@@ -38,6 +38,7 @@ from torch import Tensor
 from torch.autograd import Function
 
 from .gdn import GDN
+from .win_attention import WinBasedAttention
 
 __all__ = [
     "AttentionBlock",
@@ -53,6 +54,7 @@ __all__ = [
     "subpel_conv3x3",
     "QReLU",
     "sequential_channel_ramp",
+    "Win_noShift_Attention",
 ]
 
 
@@ -423,3 +425,50 @@ def ramp(a, b, steps=None, method="linear", **kwargs):
     if method == "log":
         return torch.logspace(math.log10(a), math.log10(b), steps, **kwargs)
     raise ValueError(f"Unknown ramp method: {method}")
+
+
+class Win_noShift_Attention(nn.Module):
+    """Window-based self-attention module."""
+
+    def __init__(self, dim, num_heads=8, window_size=8, shift_size=0):
+        super().__init__()
+        N = dim
+
+        class ResidualUnit(nn.Module):
+            """Simple residual unit."""
+
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Sequential(
+                    conv1x1(N, N // 2),
+                    nn.GELU(),
+                    conv3x3(N // 2, N // 2),
+                    nn.GELU(),
+                    conv1x1(N // 2, N),
+                )
+                self.relu = nn.GELU()
+
+            def forward(self, x):
+                identity = x
+                out = self.conv(x)
+                out += identity
+                out = self.relu(out)
+                return out
+
+        self.conv_a = nn.Sequential(ResidualUnit(), ResidualUnit(), ResidualUnit())
+
+        self.conv_b = nn.Sequential(
+            WinBasedAttention(dim=dim, num_heads=num_heads, window_size=window_size, shift_size=shift_size),
+            ResidualUnit(),
+            ResidualUnit(),
+            ResidualUnit(),
+            conv1x1(N, N),
+        )
+
+    def forward(self, x):
+        identity = x
+        a = self.conv_a(x)
+        b = self.conv_b(x)
+        out = a * torch.sigmoid(b)
+        out += identity
+        return out
