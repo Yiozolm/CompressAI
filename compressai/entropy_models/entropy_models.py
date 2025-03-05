@@ -939,3 +939,4 @@ class GaussianMixtureConditional(GaussianConditional):
         y_hat[:, nonzero] = symbols.float()
 
         return y_hat
+

@@ -34,3 +34,4 @@ from .sensetime import *
 from .vbr import *
 from .waseda import *
 from .minnen import *
+from .CCA import *

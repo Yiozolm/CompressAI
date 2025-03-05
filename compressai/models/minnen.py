@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
-from compressai.ans import BufferedRansEncoder, RansDecoder
 from timm.layers import trunc_normal_
 
+from compressai.ans import BufferedRansEncoder, RansDecoder
 from compressai.entropy_models import EntropyBottleneck, GaussianConditional
 from compressai.layers import GDN, conv3x3, subpel_conv3x3, Win_noShift_Attention, ConvTransBlock, \
     ResidualBlockWithStride, ResidualBlockUpsample, SWAtten, PatchEmbed, PatchSplit, PatchMerging, BasicLayer
@@ -404,8 +404,10 @@ class Minnen2020LRP(Minnen2020):
 
 @register_model("Zou2022-CNN")
 class WACNN(CompressionModel):
-    """CNN based model"""
-
+    r"""
+    CNN Model
+    Zou, Renjie, Chunfeng Song, and Zhaoxiang Zhang. “The Devil Is in the Details: Window-Based Attention for Image Compression.” In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 17471–80. New Orleans, LA, USA: IEEE, 2022. https://doi.org/10.1109/CVPR52688.2022.01697.
+    """
     def __init__(self, N=192, M=320, **kwargs):
         super().__init__(entropy_bottleneck_channels=N, **kwargs)
         self.num_slices = 10
@@ -697,6 +699,10 @@ class WACNN(CompressionModel):
 
 @register_model("Zou2022-STF")
 class SymmetricalTransFormer(CompressionModel):
+    r"""
+    Transformer Model
+    Zou, Renjie, Chunfeng Song, and Zhaoxiang Zhang. “The Devil Is in the Details: Window-Based Attention for Image Compression.” In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 17471–80. New Orleans, LA, USA: IEEE, 2022. https://doi.org/10.1109/CVPR52688.2022.01697.
+    """
     def __init__(self,
                  pretrain_img_size=256,
                  patch_size=2,
@@ -1085,6 +1091,10 @@ class SymmetricalTransFormer(CompressionModel):
 
 @register_model("Liu2022-TCM")
 class TCM(CompressionModel):
+    r"""
+    Liu, Jinming, Heming Sun, and Jiro Katto. “Learned Image Compression with Mixed Transformer-CNN Architectures.” In 2023 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 14388–97. Vancouver, BC, Canada: IEEE, 2023. https://doi.org/10.1109/CVPR52729.2023.01383.
+    """
+
     def __init__(self, config=[2, 2, 2, 2, 2, 2], head_dim=[8, 16, 32, 32, 16, 8], drop_path_rate=0, N=128, M=320,
                  num_slices=5, max_support_slices=5, **kwargs):
         super().__init__(entropy_bottleneck_channels=N)
@@ -1390,3 +1400,4 @@ class TCM(CompressionModel):
         x_hat = self.g_s(y_hat).clamp_(0, 1)
 
         return {"x_hat": x_hat}
+
