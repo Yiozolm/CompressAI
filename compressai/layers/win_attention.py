@@ -9,6 +9,7 @@ __all__ = [
     "BasicLayer",
     "PatchMerging",
     "PatchSplit",
+    "PatchSplitting",
 ]
 
 def window_partition(x, window_size=8):
@@ -357,6 +358,32 @@ class PatchSplit(nn.Module):
         x = self.shuffle(x)  # B, C//2 ,2H, 2W
         x = x.permute(0, 2, 3, 1).contiguous().view(B, 4 * L, -1)
         return x
+
+
+class PatchSplitting(nn.Module):
+    """Split input of size [B]x[H]x[W]x[dim] into [B]x[2H]x[2W]x[out_dim]
+    """
+    def __init__(self, dim: int, out_dim: int, norm_layer: nn.Module = nn.LayerNorm):
+        super().__init__()
+        self.dim = dim
+        self.out_dim = out_dim or dim
+        self.norm = norm_layer(dim)
+        self.reduction = nn.Linear(dim, 4 * out_dim, bias=False)
+
+    def forward(self, x):
+        _, H, W, C = x.size()
+        assert self.dim == C, f"input dimension is {C} while expecting {self.dim}"
+        x = x.view(-1, H * W, C)
+
+        x = self.norm(x)
+        x = self.reduction(x)
+
+        x = x.view(-1, H,  W, 4 * self.out_dim).permute(0, 3, 1, 2)
+        x = F.pixel_shuffle(x, upscale_factor=2)
+        x = x.permute(0, 2, 3 , 1)
+
+        return x
+
 
 
 class BasicLayer(nn.Module):
