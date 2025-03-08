@@ -19,7 +19,7 @@ __all__ = [
 ]
 
 
-@register_model("TBTC-Conv-Hyperprior")
+@register_model("zyc2022-conv-hyperprior")
 class ConvHyperprior(MeanScaleHyperprior):
     """Conv-Hyperprior
     Y. Zhu, Y. Yang, T. Cohen:
@@ -128,7 +128,7 @@ class ChARMBlockHalf(nn.Module):
         return self.layers(x)
 
 
-@register_model("TBTC-Conv-ChARM")
+@register_model("zyc2022-conv-charm")
 class ConvChARM(ConvHyperprior):
     """Conv-ChARM
     Y. Zhu, Y. Yang, T. Cohen:
@@ -371,7 +371,7 @@ class SwinTHyperSynthesisTransform(nn.Module):
         return x.permute(0, 3, 1, 2)
 
 
-@register_model("TBTC-Swin-Hyperprior")
+@register_model("zyc2022-swint-hyperprior")
 class SwinTHyperprior(ConvHyperprior):
     """SwinT-Hyperprior
     Y. Zhu, Y. Yang, T. Cohen:
@@ -403,7 +403,7 @@ class SwinTHyperprior(ConvHyperprior):
         return net
 
 
-@register_model("TBTC-Swin-ChARM")
+@register_model("zyc2022-swint-charm")
 class SwinTChARM(ConvChARM):
     """SwinT-ChARM
     Y. Zhu, Y. Yang, T. Cohen:

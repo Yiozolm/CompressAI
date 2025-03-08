@@ -408,6 +408,7 @@ class WACNN(CompressionModel):
     CNN Model
     Zou, Renjie, Chunfeng Song, and Zhaoxiang Zhang. “The Devil Is in the Details: Window-Based Attention for Image Compression.” In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 17471–80. New Orleans, LA, USA: IEEE, 2022. https://doi.org/10.1109/CVPR52688.2022.01697.
     """
+
     def __init__(self, N=192, M=320, **kwargs):
         super().__init__(entropy_bottleneck_channels=N, **kwargs)
         self.num_slices = 10
@@ -703,6 +704,7 @@ class SymmetricalTransFormer(CompressionModel):
     Transformer Model
     Zou, Renjie, Chunfeng Song, and Zhaoxiang Zhang. “The Devil Is in the Details: Window-Based Attention for Image Compression.” In 2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 17471–80. New Orleans, LA, USA: IEEE, 2022. https://doi.org/10.1109/CVPR52688.2022.01697.
     """
+
     def __init__(self,
                  pretrain_img_size=256,
                  patch_size=2,
@@ -1143,8 +1145,7 @@ class TCM(CompressionModel):
                         [conv3x3(2 * N, 192, stride=2)]
 
         self.h_a = nn.Sequential(
-            *[ResidualBlockWithStride(320, 2 * N, 2)] + \
-             self.ha_down1
+            *[ResidualBlockWithStride(320, 2 * N, 2)] + self.ha_down1
         )
 
         self.hs_up1 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i % 2 else 'SW')
@@ -1152,8 +1153,7 @@ class TCM(CompressionModel):
                       [subpel_conv3x3(2 * N, 320, 2)]
 
         self.h_mean_s = nn.Sequential(
-            *[ResidualBlockUpsample(192, 2 * N, 2)] + \
-             self.hs_up1
+            *[ResidualBlockUpsample(192, 2 * N, 2)] + self.hs_up1
         )
 
         self.hs_up2 = [ConvTransBlock(N, N, 32, 4, 0, 'W' if not i % 2 else 'SW')
@@ -1161,8 +1161,7 @@ class TCM(CompressionModel):
                       [subpel_conv3x3(2 * N, 320, 2)]
 
         self.h_scale_s = nn.Sequential(
-            *[ResidualBlockUpsample(192, 2 * N, 2)] + \
-             self.hs_up2
+            *[ResidualBlockUpsample(192, 2 * N, 2)] + self.hs_up2
         )
 
         self.atten_mean = nn.ModuleList(
@@ -1400,4 +1399,3 @@ class TCM(CompressionModel):
         x_hat = self.g_s(y_hat).clamp_(0, 1)
 
         return {"x_hat": x_hat}
-

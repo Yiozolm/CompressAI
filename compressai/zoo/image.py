@@ -256,6 +256,212 @@ cfgs = {
         5: (192,),
         6: (192,),
     },
+    "zyc2022-conv-hyperprior": {
+        'S': (192, 128),
+        'M': (320, 192),
+        'L': (448, 256),
+    },
+    "zyc2022-conv-charm": {
+        'S': (192, 128),
+        'M': (320, 192),
+        'L': (448, 256),
+    },
+    "zyc2022-swint-hyperprior": {
+        'S': {
+            'g_a': {
+                'input_dim': 3,
+                'embed_dim': [96, 128, 160, 192],
+                'embed_out_dim': [128, 160, 192, None],
+                'depths': [2, 2, 6, 2],
+                'head_dim': [32, 32, 32, 32],
+                'window_size': [8, 8, 8, 8]
+            },
+            'g_s': {
+                'embed_dim': [192, 160, 128, 96],
+                'embed_out_dim': [160, 128, 96, 3],
+                'depths': [2, 6, 2, 2],
+                'head_dim': [32, 32, 32, 32],
+                'window_size': [8, 8, 8, 8],
+            },
+            'h_a': {
+                'input_dim': 192,
+                'embed_dim': [96, 128],
+                'embed_out_dim': [128, None],
+                'depths': [5, 1],
+                'head_dim': [32, 32],
+                'window_size': [4, 4]
+            },
+            'h_s': {
+                'embed_dim': [128, 96],
+                'embed_out_dim': [96, int(2 * 192)],
+                'depths': [1, 5],
+                'head_dim': [32, 32],
+                'window_size': [4, 4],
+            }
+        },
+        'M': {
+            'g_a': {
+                'input_dim': 3,
+                'embed_dim': [128, 192, 256, 320],
+                'embed_out_dim': [192, 256, 320, None],
+                'depths': [2, 2, 6, 2],
+                'head_dim': [32, 32, 32, 32],
+                'window_size': [8, 8, 8, 8]
+            },
+            'g_s': {
+                'embed_dim': [320, 256, 192, 128],
+                'embed_out_dim': [256, 192, 128, 3],
+                'depths': [2, 6, 2, 2],
+                'head_dim': [32, 32, 32, 32],
+                'window_size': [8, 8, 8, 8],
+            },
+            'h_a': {
+                'input_dim': 320,
+                'embed_dim': [192, 192],
+                'embed_out_dim': [192, None],
+                'depths': [5, 1],
+                'head_dim': [32, 32],
+                'window_size': [4, 4]
+            },
+            'h_s': {
+                'embed_dim': [192, 192],
+                'embed_out_dim': [192, int(2 * 320)],
+                'depths': [1, 5],
+                'head_dim': [32, 32],
+                'window_size': [4, 4],
+            }
+        },
+        'L': {
+            'g_a': {
+                'input_dim': 3,
+                'embed_dim': [160, 256, 352, 448],
+                'embed_out_dim': [256, 352, 448, None],
+                'depths': [2, 2, 6, 2],
+                'head_dim': [32, 32, 32, 32],
+                'window_size': [8, 8, 8, 8]
+            },
+            'g_s': {
+                'embed_dim': [448, 352, 256, 160],
+                'embed_out_dim': [352, 256, 160, 3],
+                'depths': [2, 6, 2, 2],
+                'head_dim': [32, 32, 32, 32],
+                'window_size': [8, 8, 8, 8],
+            },
+            'h_a': {
+                'input_dim': 448,
+                'embed_dim': [192, 256],
+                'embed_out_dim': [256, None],
+                'depths': [5, 1],
+                'head_dim': [32, 32],
+                'window_size': [4, 4]
+            },
+            'h_s': {
+                'embed_dim': [256, 192],
+                'embed_out_dim': [192, int(2 * 448)],
+                'depths': [1, 5],
+                'head_dim': [32, 32],
+                'window_size': [4, 4],
+            }
+        },
+    },
+    "zyc2022-swint-charm": {
+        'S': {
+            'g_a': {
+                'input_dim': 3,
+                'embed_dim': [96, 128, 160, 192],
+                'embed_out_dim': [128, 160, 192, None],
+                'depths': [2, 2, 6, 2],
+                'head_dim': [32, 32, 32, 32],
+                'window_size': [8, 8, 8, 8]
+            },
+            'g_s': {
+                'embed_dim': [192, 160, 128, 96],
+                'embed_out_dim': [160, 128, 96, 3],
+                'depths': [2, 6, 2, 2],
+                'head_dim': [32, 32, 32, 32],
+                'window_size': [8, 8, 8, 8],
+            },
+            'h_a': {
+                'input_dim': 192,
+                'embed_dim': [96, 128],
+                'embed_out_dim': [128, None],
+                'depths': [5, 1],
+                'head_dim': [32, 32],
+                'window_size': [4, 4]
+            },
+            'h_s': {
+                'embed_dim': [128, 96],
+                'embed_out_dim': [96, int(2 * 192)],
+                'depths': [1, 5],
+                'head_dim': [32, 32],
+                'window_size': [4, 4],
+            }
+        },
+        'M': {
+            'g_a': {
+                'input_dim': 3,
+                'embed_dim': [128, 192, 256, 320],
+                'embed_out_dim': [192, 256, 320, None],
+                'depths': [2, 2, 6, 2],
+                'head_dim': [32, 32, 32, 32],
+                'window_size': [8, 8, 8, 8]
+            },
+            'g_s': {
+                'embed_dim': [320, 256, 192, 128],
+                'embed_out_dim': [256, 192, 128, 3],
+                'depths': [2, 6, 2, 2],
+                'head_dim': [32, 32, 32, 32],
+                'window_size': [8, 8, 8, 8],
+            },
+            'h_a': {
+                'input_dim': 320,
+                'embed_dim': [192, 192],
+                'embed_out_dim': [192, None],
+                'depths': [5, 1],
+                'head_dim': [32, 32],
+                'window_size': [4, 4]
+            },
+            'h_s': {
+                'embed_dim': [192, 192],
+                'embed_out_dim': [192, int(2 * 320)],
+                'depths': [1, 5],
+                'head_dim': [32, 32],
+                'window_size': [4, 4],
+            }
+        },
+        'L': {
+            'g_a': {
+                'input_dim': 3,
+                'embed_dim': [160, 256, 352, 448],
+                'embed_out_dim': [256, 352, 448, None],
+                'depths': [2, 2, 6, 2],
+                'head_dim': [32, 32, 32, 32],
+                'window_size': [8, 8, 8, 8]
+            },
+            'g_s': {
+                'embed_dim': [448, 352, 256, 160],
+                'embed_out_dim': [352, 256, 160, 3],
+                'depths': [2, 6, 2, 2],
+                'head_dim': [32, 32, 32, 32],
+                'window_size': [8, 8, 8, 8],
+            },
+            'h_a': {
+                'input_dim': 448,
+                'embed_dim': [192, 256],
+                'embed_out_dim': [256, None],
+                'depths': [5, 1],
+                'head_dim': [32, 32],
+                'window_size': [4, 4]
+            },
+            'h_s': {
+                'embed_dim': [256, 192],
+                'embed_out_dim': [192, int(2 * 448)],
+                'depths': [1, 5],
+                'head_dim': [32, 32],
+                'window_size': [4, 4],
+            }
+        },
+    }
 }
 
 

@@ -137,8 +137,8 @@ class MaskedConv2d(nn.Conv2d):
 
         self.register_buffer("mask", torch.ones_like(self.weight.data))
         _, _, h, w = self.mask.size()
-        self.mask[:, :, h // 2, w // 2 + (mask_type == "B") :] = 0
-        self.mask[:, :, h // 2 + 1 :] = 0
+        self.mask[:, :, h // 2, w // 2 + (mask_type == "B"):] = 0
+        self.mask[:, :, h // 2 + 1:] = 0
 
     def forward(self, x: Tensor) -> Tensor:
         # TODO(begaintj): weight assigment is not supported by torchscript
@@ -180,7 +180,7 @@ def conv3x3(in_ch: int, out_ch: int, stride: int = 1) -> nn.Module:
 def subpel_conv3x3(in_ch: int, out_ch: int, r: int = 1) -> nn.Sequential:
     """3x3 sub-pixel convolution for up-sampling."""
     return nn.Sequential(
-        nn.Conv2d(in_ch, out_ch * r**2, kernel_size=3, padding=1), nn.PixelShuffle(r)
+        nn.Conv2d(in_ch, out_ch * r ** 2, kernel_size=3, padding=1), nn.PixelShuffle(r)
     )
 
 
@@ -365,7 +365,7 @@ class QReLU(Function):
         # pre-computed scale with gamma function
         ctx.alpha = 0.9943258522851727
         ctx.beta = beta
-        ctx.max_value = 2**bit_depth - 1
+        ctx.max_value = 2 ** bit_depth - 1
         ctx.save_for_backward(input)
 
         return input.clamp(min=0, max=ctx.max_value)
@@ -377,11 +377,11 @@ class QReLU(Function):
 
         grad_input = grad_output.clone()
         grad_sub = (
-            torch.exp(
-                (-ctx.alpha**ctx.beta)
-                * torch.abs(2.0 * input / ctx.max_value - 1) ** ctx.beta
-            )
-            * grad_output.clone()
+                torch.exp(
+                    (-ctx.alpha ** ctx.beta)
+                    * torch.abs(2.0 * input / ctx.max_value - 1) ** ctx.beta
+                )
+                * grad_output.clone()
         )
 
         grad_input[input < 0] = grad_sub[input < 0]
@@ -391,16 +391,16 @@ class QReLU(Function):
 
 
 def sequential_channel_ramp(
-    in_ch: int,
-    out_ch: int,
-    *,
-    min_ch: int = 0,
-    num_layers: int = 3,
-    interp: str = "linear",
-    make_layer=None,
-    make_act=None,
-    skip_last_act: bool = True,
-    **layer_kwargs,
+        in_ch: int,
+        out_ch: int,
+        *,
+        min_ch: int = 0,
+        num_layers: int = 3,
+        interp: str = "linear",
+        make_layer=None,
+        make_act=None,
+        skip_last_act: bool = True,
+        **layer_kwargs,
 ) -> nn.Module:
     """Interleave layers of gradually ramping channels with nonlinearities."""
     channels = ramp(in_ch, out_ch, num_layers + 1, method=interp).floor().int()

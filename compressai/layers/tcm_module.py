@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from timm.layers import trunc_normal_, DropPath
-
+from timm.models.layers import trunc_normal_, DropPath
 
 from compressai.layers import (
     AttentionBlock,
@@ -31,16 +30,20 @@ class WMSA(nn.Module):
         self.output_dim = output_dim
         self.head_dim = head_dim
         self.scale = self.head_dim ** -0.5
-        self.n_heads = input_dim//head_dim
+        self.n_heads = input_dim // head_dim
         self.window_size = window_size
-        self.type=type
-        self.embedding_layer = nn.Linear(self.input_dim, 3*self.input_dim, bias=True)
-        self.relative_position_params = nn.Parameter(torch.zeros((2 * window_size - 1)*(2 * window_size -1), self.n_heads))
+        self.type = type
+        self.embedding_layer = nn.Linear(self.input_dim, 3 * self.input_dim, bias=True)
+        self.relative_position_params = nn.Parameter(
+            torch.zeros((2 * window_size - 1) * (2 * window_size - 1), self.n_heads))
 
         self.linear = nn.Linear(self.input_dim, self.output_dim)
 
         trunc_normal_(self.relative_position_params, std=.02)
-        self.relative_position_params = torch.nn.Parameter(self.relative_position_params.view(2*window_size-1, 2*window_size-1, self.n_heads).transpose(1,2).transpose(0,1))
+        self.relative_position_params = torch.nn.Parameter(
+            self.relative_position_params.view(2 * window_size - 1, 2 * window_size - 1, self.n_heads).transpose(1,
+                                                                                                                 2).transpose(
+                0, 1))
 
     def generate_mask(self, h, w, p, shift):
         """ generating the mask of SW-MSA
@@ -68,7 +71,7 @@ class WMSA(nn.Module):
         Returns:
             output: tensor shape [b h w c]
         """
-        if self.type!='W': x = torch.roll(x, shifts=(-(self.window_size//2), -(self.window_size//2)), dims=(1,2))
+        if self.type != 'W': x = torch.roll(x, shifts=(-(self.window_size // 2), -(self.window_size // 2)), dims=(1, 2))
         x = rearrange(x, 'b (w1 p1) (w2 p2) c -> b w1 w2 p1 p2 c', p1=self.window_size, p2=self.window_size)
         h_windows = x.size(1)
         w_windows = x.size(2)
@@ -78,7 +81,7 @@ class WMSA(nn.Module):
         sim = torch.einsum('hbwpc,hbwqc->hbwpq', q, k) * self.scale
         sim = sim + rearrange(self.relative_embedding(), 'h p q -> h 1 1 p q')
         if self.type != 'W':
-            attn_mask = self.generate_mask(h_windows, w_windows, self.window_size, shift=self.window_size//2)
+            attn_mask = self.generate_mask(h_windows, w_windows, self.window_size, shift=self.window_size // 2)
             sim = sim.masked_fill_(attn_mask, float("-inf"))
 
         probs = nn.functional.softmax(sim, dim=-1)
@@ -87,13 +90,15 @@ class WMSA(nn.Module):
         output = self.linear(output)
         output = rearrange(output, 'b (w1 w2) (p1 p2) c -> b (w1 p1) (w2 p2) c', w1=h_windows, p1=self.window_size)
 
-        if self.type!='W': output = torch.roll(output, shifts=(self.window_size//2, self.window_size//2), dims=(1,2))
+        if self.type != 'W': output = torch.roll(output, shifts=(self.window_size // 2, self.window_size // 2),
+                                                 dims=(1, 2))
         return output
 
     def relative_embedding(self):
         cord = torch.tensor(np.array([[i, j] for i in range(self.window_size) for j in range(self.window_size)]))
-        relation = cord[:, None, :] - cord[None, :, :] + self.window_size -1
-        return self.relative_position_params[:, relation[:,:,0].long(), relation[:,:,1].long()]
+        relation = cord[:, None, :] - cord[None, :, :] + self.window_size - 1
+        return self.relative_position_params[:, relation[:, :, 0].long(), relation[:, :, 1].long()]
+
 
 class Block(nn.Module):
     def __init__(self, input_dim, output_dim, head_dim, window_size, drop_path, type='W', input_resolution=None):
@@ -119,6 +124,7 @@ class Block(nn.Module):
         x = x + self.drop_path(self.mlp(self.ln2(x)))
         return x
 
+
 class ConvTransBlock(nn.Module):
     def __init__(self, conv_dim, trans_dim, head_dim, window_size, drop_path, type='W'):
         """ SwinTransformer and Conv Block
@@ -131,9 +137,10 @@ class ConvTransBlock(nn.Module):
         self.drop_path = drop_path
         self.type = type
         assert self.type in ['W', 'SW']
-        self.trans_block = Block(self.trans_dim, self.trans_dim, self.head_dim, self.window_size, self.drop_path, self.type)
-        self.conv1_1 = nn.Conv2d(self.conv_dim+self.trans_dim, self.conv_dim+self.trans_dim, 1, 1, 0, bias=True)
-        self.conv1_2 = nn.Conv2d(self.conv_dim+self.trans_dim, self.conv_dim+self.trans_dim, 1, 1, 0, bias=True)
+        self.trans_block = Block(self.trans_dim, self.trans_dim, self.head_dim, self.window_size, self.drop_path,
+                                 self.type)
+        self.conv1_1 = nn.Conv2d(self.conv_dim + self.trans_dim, self.conv_dim + self.trans_dim, 1, 1, 0, bias=True)
+        self.conv1_2 = nn.Conv2d(self.conv_dim + self.trans_dim, self.conv_dim + self.trans_dim, 1, 1, 0, bias=True)
 
         self.conv_block = ResidualBlock(self.conv_dim, self.conv_dim)
 
@@ -146,6 +153,7 @@ class ConvTransBlock(nn.Module):
         res = self.conv1_2(torch.cat((conv_x, trans_x), dim=1))
         x = x + res
         return x
+
 
 class SWAtten(AttentionBlock):
     def __init__(self, input_dim, output_dim, head_dim, window_size, drop_path, inter_dim=192) -> None:
@@ -170,6 +178,7 @@ class SWAtten(AttentionBlock):
         out = self.out_conv(out)
         return out
 
+
 class SwinBlock(nn.Module):
     def __init__(self, input_dim, output_dim, head_dim, window_size, drop_path) -> None:
         super().__init__()
@@ -182,11 +191,11 @@ class SwinBlock(nn.Module):
         if (x.size(-1) <= self.window_size) or (x.size(-2) <= self.window_size):
             padding_row = (self.window_size - x.size(-2)) // 2
             padding_col = (self.window_size - x.size(-1)) // 2
-            x = F.pad(x, (padding_col, padding_col+1, padding_row, padding_row+1))
+            x = F.pad(x, (padding_col, padding_col + 1, padding_row, padding_row + 1))
         trans_x = Rearrange('b c h w -> b h w c')(x)
         trans_x = self.block_1(trans_x)
-        trans_x =  self.block_2(trans_x)
+        trans_x = self.block_2(trans_x)
         trans_x = Rearrange('b h w c -> b c h w')(trans_x)
         if resize:
-            x = F.pad(x, (-padding_col, -padding_col-1, -padding_row, -padding_row-1))
+            x = F.pad(x, (-padding_col, -padding_col - 1, -padding_row, -padding_row - 1))
         return trans_x

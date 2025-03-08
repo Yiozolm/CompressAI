@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from timm.layers import DropPath, to_2tuple, trunc_normal_
+from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
 __all__ = [
     "PatchEmbed",
@@ -11,6 +11,7 @@ __all__ = [
     "PatchSplit",
     "PatchSplitting",
 ]
+
 
 def window_partition(x, window_size=8):
     """
@@ -56,7 +57,8 @@ class WindowAttention(nn.Module):
         proj_drop (float, optional): Dropout ratio of output. Default: 0.0
     """
 
-    def __init__(self, dim=192, window_size=(8, 8), num_heads=8, qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0.):
+    def __init__(self, dim=192, window_size=(8, 8), num_heads=8, qkv_bias=True, qk_scale=None, attn_drop=0.,
+                 proj_drop=0.):
 
         super().__init__()
         self.dim = dim
@@ -126,9 +128,8 @@ class WindowAttention(nn.Module):
 
 class WinBasedAttention(nn.Module):
 
-
     def __init__(self, dim=192, num_heads=8, window_size=8, shift_size=0,
-                 qkv_bias=True, qk_scale=None, drop=0., attn_drop=0., drop_path=0.,):
+                 qkv_bias=True, qk_scale=None, drop=0., attn_drop=0., drop_path=0., ):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -143,12 +144,10 @@ class WinBasedAttention(nn.Module):
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
-
     def forward(self, x):
         B, C, H, W = x.shape
         shortcut = x
         x = x.permute(0, 2, 3, 1)
-
 
         if self.shift_size > 0:
             # calculate attention mask for SW-MSA
@@ -363,6 +362,7 @@ class PatchSplit(nn.Module):
 class PatchSplitting(nn.Module):
     """Split input of size [B]x[H]x[W]x[dim] into [B]x[2H]x[2W]x[out_dim]
     """
+
     def __init__(self, dim: int, out_dim: int, norm_layer: nn.Module = nn.LayerNorm):
         super().__init__()
         self.dim = dim
@@ -378,12 +378,11 @@ class PatchSplitting(nn.Module):
         x = self.norm(x)
         x = self.reduction(x)
 
-        x = x.view(-1, H,  W, 4 * self.out_dim).permute(0, 3, 1, 2)
+        x = x.view(-1, H, W, 4 * self.out_dim).permute(0, 3, 1, 2)
         x = F.pixel_shuffle(x, upscale_factor=2)
-        x = x.permute(0, 2, 3 , 1)
+        x = x.permute(0, 2, 3, 1)
 
         return x
-
 
 
 class BasicLayer(nn.Module):
@@ -508,11 +507,9 @@ class PatchEmbed(nn.Module):
         return x
 
 
-
 if __name__ == '__main__':
     x = torch.rand([2, 192, 64, 64])
     attn = WinBasedAttention()
     # x = window_partition(x)
     x = attn(x)
     print(x.shape)
-

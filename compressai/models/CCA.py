@@ -11,10 +11,10 @@ from .base import (
     CompressionModel,
 )
 
-
 __all__ = [
     "CCA",
 ]
+
 
 class LayerNormFunction(torch.autograd.Function):
 
@@ -334,6 +334,7 @@ class CCA(CompressionModel):
     r"""
     Han, Minghao, Shiyin Jiang, Shengxi Li, Xin Deng, Mai Xu, Ce Zhu和Shuhang Gu. "Causal Context Adjustment Loss for Learned Image Compression". in The Thirty-Eighth Annual Conference on Neural Information Processing Systems (NIPS). Vancouver CANADA, 2024.
     """
+
     def __init__(
             self,
             M=320,
