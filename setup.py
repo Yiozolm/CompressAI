@@ -145,6 +145,7 @@ setup(
         "typing-extensions>=4.0.0",
         "torchvision",
         "pytorch-msssim",
+        "timm",
         "tqdm",
     ],
     extras_require=get_extra_requirements(),
