@@ -192,4 +192,10 @@ For any work related to the variable bitrate models, please cite
  * AOM AV1 reference software: https://aomedia.googlesource.com/aom
  * Z. Cheng et al. 2020: https://github.com/ZhengxueCheng/Learned-Image-Compression-with-GMM-and-Attention
  * Kodak image dataset: http://r0k.us/graphics/kodak/
-
+---
+ * Minnen (ICIP2020) unofficial Pytorch Implementation: https://github.com/tokkiwa/minnen2020
+ * CNN/STF (CVPR2022) official Pytorch Implementation: https://github.com/Googolxx/STF
+ * TBTC (ICLR 2022) official Pytorch Implementation: https://github.com/ali-zafari/TBTC
+ * LIC-TCM (CVPR2023) official Pytorch Implementation: https://github.com/jmliu206/LIC_TCM
+ * MLIC/++ (ACM MM2023) official Pytorch Implementation (haven't integrated yet): https://github.com/JiangWeibeta/MLIC
+ * CCA (NIPS2024) official Pytorch Implementation: https://github.com/LabShuHangGU/CCA
