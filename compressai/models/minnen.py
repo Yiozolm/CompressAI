@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from timm.layers import trunc_normal_
+from timm.models.layers import trunc_normal_
 
 from compressai.ans import BufferedRansEncoder, RansDecoder
 from compressai.entropy_models import EntropyBottleneck, GaussianConditional
