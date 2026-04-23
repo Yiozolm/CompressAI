@@ -28,6 +28,7 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from .base import *
+from .glic import *
 from .google import *
 from .pointcloud import *
 from .sensetime import *
