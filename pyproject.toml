@@ -39,8 +39,8 @@ dependencies = [
   "pytorch-msssim",
   "scipy",
   "setuptools>=68", # For --no-build-isolation.
+  "timm",
   "tomli>=2.2.1",
-  "torch-geometric>=2.3.0",
   "torch>=1.13.1",
   "torch>=2.6.0; python_version >= '3.12'",
   "torchvision>=0.14.1,<0.20; python_version < '3.9'",
@@ -79,7 +79,21 @@ tutorials = [
 ]
 pointcloud = [
   # "pointops-yoda", # Please install via uv pip install pointops-yoda --no-build-isolation
+  "torch-geometric>=2.3.0",
   "pyntcloud-yoda",
+]
+invcompress = [
+  "FrEIA",
+]
+lic = [
+  "pytorch-wavelets",
+]
+mamba = [
+  "mamba-ssm",
+  "triton; platform_system == 'Linux'",
+]
+ftic = [
+  "range-coder",
 ]
 
 # NOTE: Temporarily duplicated from [project.optional-dependencies] until
@@ -108,6 +122,23 @@ doc = [
 tutorials = [
   "ipywidgets",
   "jupyter",
+]
+pointcloud = [
+  "torch-geometric>=2.3.0",
+  "pyntcloud-yoda",
+]
+invcompress = [
+  "FrEIA",
+]
+lic = [
+  "pytorch-wavelets",
+]
+mamba = [
+  "mamba-ssm",
+  "triton; platform_system == 'Linux'",
+]
+ftic = [
+  "range-coder",
 ]
 
 [tool.setuptools]
