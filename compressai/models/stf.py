@@ -10,7 +10,12 @@ import torch.nn as nn
 from torch import Tensor
 
 from compressai.layers import GDN, conv3x3, subpel_conv3x3
-from compressai.layers.lic.swin import PatchMerging, PatchSplit
+from compressai.entropy_models.cca import (
+    has_cca_aux_state,
+    infer_cca_hidden_channels,
+    infer_cca_num_layers,
+)
+from compressai.layers.attn import PatchMerging, PatchSplit
 from compressai.layers.lic.stf import PatchEmbed, STFBasicLayer, STFWinNoShiftAttention
 from compressai.models.utils import conv, deconv
 from compressai.registry import register_model
@@ -32,6 +37,9 @@ class WACNN(SliceEntropyCompressionModel):
         M: int = 320,
         num_slices: int = 10,
         max_support_slices: int = 5,
+        use_cca: bool = False,
+        cca_hidden_channels: int = 224,
+        cca_num_layers: int = 4,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -90,12 +98,26 @@ class WACNN(SliceEntropyCompressionModel):
             nn.GELU(),
             conv3x3(288, M),
         )
-        self._init_slice_entropy(M, N, num_slices, max_support_slices)
+        self._init_slice_entropy(
+            M,
+            N,
+            num_slices,
+            max_support_slices,
+            use_cca=use_cca,
+            cca_hidden_channels=cca_hidden_channels,
+            cca_num_layers=cca_num_layers,
+        )
 
     def forward(self, x: Tensor) -> Dict[str, Dict[str, Tensor] | Tensor]:
         y = self.g_a(x)
-        y_hat, y_likelihoods, z_likelihoods = self._forward_latent(y)
-        return {"x_hat": self.g_s(y_hat), "likelihoods": {"y": y_likelihoods, "z": z_likelihoods}}
+        latent_output = self._forward_latent_output(y)
+        output: Dict[str, Dict[str, Tensor] | Tensor] = {
+            "x_hat": self.g_s(latent_output["y_hat"]),
+            "likelihoods": latent_output["likelihoods"],
+        }
+        if "aux_likelihoods" in latent_output:
+            output["aux_likelihoods"] = latent_output["aux_likelihoods"]
+        return output
 
     def compress(self, x: Tensor) -> Dict[str, object]:
         return self._compress_latent(self.g_a(x))
@@ -109,7 +131,15 @@ class WACNN(SliceEntropyCompressionModel):
         M = state_dict["g_a.7.weight"].size(0)
         num_slices = infer_num_slices(state_dict) or 10
         max_support_slices = infer_max_support_slices(state_dict, M, num_slices)
-        net = cls(N=N, M=M, num_slices=num_slices, max_support_slices=max_support_slices)
+        net = cls(
+            N=N,
+            M=M,
+            num_slices=num_slices,
+            max_support_slices=max_support_slices,
+            use_cca=has_cca_aux_state(state_dict),
+            cca_hidden_channels=infer_cca_hidden_channels(state_dict),
+            cca_num_layers=infer_cca_num_layers(state_dict),
+        )
         net.load_state_dict(state_dict)
         return net
 
@@ -135,6 +165,9 @@ class SymmetricalTransFormer(SliceEntropyCompressionModel):
         drop_path_rate: float = 0.2,
         norm_layer: type[nn.Module] = nn.LayerNorm,
         patch_norm: bool = True,
+        use_cca: bool = False,
+        cca_hidden_channels: int = 224,
+        cca_num_layers: int = 4,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -244,6 +277,9 @@ class SymmetricalTransFormer(SliceEntropyCompressionModel):
             bottleneck_channels,
             num_slices,
             num_slices // 2 if max_support_slices is None else max_support_slices,
+            use_cca=use_cca,
+            cca_hidden_channels=cca_hidden_channels,
+            cca_num_layers=cca_num_layers,
         )
 
     def _analysis_transform(self, x: Tensor) -> Tuple[Tensor, int, int]:
@@ -266,11 +302,14 @@ class SymmetricalTransFormer(SliceEntropyCompressionModel):
 
     def forward(self, x: Tensor) -> Dict[str, Dict[str, Tensor] | Tensor]:
         y, height, width = self._analysis_transform(x)
-        y_hat, y_likelihoods, z_likelihoods = self._forward_latent(y)
-        return {
-            "x_hat": self._synthesis_transform(y_hat, height, width),
-            "likelihoods": {"y": y_likelihoods, "z": z_likelihoods},
+        latent_output = self._forward_latent_output(y)
+        output: Dict[str, Dict[str, Tensor] | Tensor] = {
+            "x_hat": self._synthesis_transform(latent_output["y_hat"], height, width),
+            "likelihoods": latent_output["likelihoods"],
         }
+        if "aux_likelihoods" in latent_output:
+            output["aux_likelihoods"] = latent_output["aux_likelihoods"]
+        return output
 
     def compress(self, x: Tensor) -> Dict[str, object]:
         y, _, _ = self._analysis_transform(x)
@@ -320,6 +359,9 @@ class SymmetricalTransFormer(SliceEntropyCompressionModel):
             window_size=window_size,
             num_slices=num_slices,
             max_support_slices=max_support_slices,
+            use_cca=has_cca_aux_state(state_dict),
+            cca_hidden_channels=infer_cca_hidden_channels(state_dict),
+            cca_num_layers=infer_cca_num_layers(state_dict),
         )
         net.load_state_dict(state_dict)
         return net

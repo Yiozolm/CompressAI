@@ -33,6 +33,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from compressai.layers import conv, deconv  # re-exported for backward compatibility
+
 KEY_MAP = {"_bias": "biases", "_matrix": "matrices", "_factor": "factors"}
 
 
@@ -145,27 +147,6 @@ def remap_old_keys(module_name, state_dict):
         new_state_dict[k] = v
 
     return new_state_dict
-
-
-def conv(in_channels, out_channels, kernel_size=5, stride=2):
-    return nn.Conv2d(
-        in_channels,
-        out_channels,
-        kernel_size=kernel_size,
-        stride=stride,
-        padding=kernel_size // 2,
-    )
-
-
-def deconv(in_channels, out_channels, kernel_size=5, stride=2):
-    return nn.ConvTranspose2d(
-        in_channels,
-        out_channels,
-        kernel_size=kernel_size,
-        stride=stride,
-        output_padding=stride - 1,
-        padding=kernel_size // 2,
-    )
 
 
 def gaussian_kernel1d(

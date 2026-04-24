@@ -29,9 +29,11 @@
 
 from . import pointcloud
 from .pointcloud import *
+from .cca import CCARateDistortionLoss
 from .rate_distortion import RateDistortionLoss
 
 __all__ = [
     *pointcloud.__all__,
+    "CCARateDistortionLoss",
     "RateDistortionLoss",
 ]

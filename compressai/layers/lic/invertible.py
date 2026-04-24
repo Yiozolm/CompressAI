@@ -106,8 +106,18 @@ def build_freia_coupling_layer(
 
 def build_freia_invertible_conv(*args: Any, **kwargs: Any) -> nn.Module:
     conv_class = _resolve_freia_class(
-        ("InvertibleConv1x1", "Fixed1x1ConvOrthogonal")
+        ("InvertibleConv1x1", "Fixed1x1ConvOrthogonal", "Fixed1x1Conv")
     )
+    if conv_class.__name__ == "Fixed1x1Conv" and "M" not in kwargs:
+        if not args:
+            raise ValueError("dims_in must be provided to initialize Fixed1x1Conv.")
+        dims_in = args[0]
+        if not dims_in or not isinstance(dims_in, (list, tuple)):
+            raise ValueError("dims_in must be a non-empty sequence.")
+        num_channels = dims_in[0][0]
+        random_matrix = torch.randn(num_channels, num_channels)
+        orthogonal_matrix, _ = torch.linalg.qr(random_matrix)
+        kwargs["M"] = orthogonal_matrix
     return conv_class(*args, **kwargs)
 
 
@@ -119,7 +129,12 @@ def build_freia_squeeze_pair(
 ) -> Tuple[nn.Module, nn.Module]:
     downsample_class = _resolve_freia_class((downsample_name,))
     upsample_class = _resolve_freia_class((upsample_name,))
-    return downsample_class(*args, **kwargs), upsample_class(*args, **kwargs)
+    downsample_backend = downsample_class(*args, **kwargs)
+    if not args:
+        raise ValueError("dims_in must be provided to initialize FrEIA squeeze.")
+    upsample_dims_in = downsample_backend.output_dims(args[0])
+    upsample_backend = upsample_class(upsample_dims_in, **kwargs)
+    return downsample_backend, upsample_backend
 
 
 def _initialize_weights(modules: Sequence[nn.Module], scale: float = 1.0) -> None:

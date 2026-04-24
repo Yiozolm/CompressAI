@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from typing import Dict, Sequence, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 import torch.nn as nn
 
 from torch import Tensor
 
-from compressai.entropy_models import EntropyBottleneck
+from compressai.entropy_models import (
+    CausalContextAdjustmentEntropyModel,
+    EntropyBottleneck,
+)
 from compressai.latent_codecs import ChannelSliceLatentCodec
 from compressai.models.utils import conv
 
@@ -78,6 +81,7 @@ class SliceEntropyCompressionModel(CompressionModel):
     h_scale_s: nn.Module
     entropy_bottleneck: EntropyBottleneck
     latent_codec: ChannelSliceLatentCodec
+    cca_aux_entropy_model: Optional[CausalContextAdjustmentEntropyModel]
 
     def _init_slice_entropy(
         self,
@@ -85,9 +89,24 @@ class SliceEntropyCompressionModel(CompressionModel):
         entropy_bottleneck_channels: int,
         num_slices: int,
         max_support_slices: int,
+        use_cca: bool = False,
+        cca_hidden_channels: int = 224,
+        cca_num_layers: int = 4,
+        mean_support_transforms: Optional[nn.ModuleList] = None,
+        scale_support_transforms: Optional[nn.ModuleList] = None,
     ) -> None:
         if latent_channels % num_slices != 0:
             raise ValueError("latent_channels must be divisible by num_slices")
+        if (
+            mean_support_transforms is not None
+            and len(mean_support_transforms) != num_slices
+        ):
+            raise ValueError("mean_support_transforms must have num_slices entries")
+        if (
+            scale_support_transforms is not None
+            and len(scale_support_transforms) != num_slices
+        ):
+            raise ValueError("scale_support_transforms must have num_slices entries")
 
         slice_channels = latent_channels // num_slices
         cc_mean_transforms = nn.ModuleList(
@@ -118,9 +137,21 @@ class SliceEntropyCompressionModel(CompressionModel):
             cc_mean_transforms=cc_mean_transforms,
             cc_scale_transforms=cc_scale_transforms,
             lrp_transforms=lrp_transforms,
+            mean_support_transforms=mean_support_transforms,
+            scale_support_transforms=scale_support_transforms,
             num_slices=num_slices,
             max_support_slices=max_support_slices,
             quantizer="ste",
+        )
+        self.cca_aux_entropy_model = (
+            CausalContextAdjustmentEntropyModel(
+                latent_channels=latent_channels,
+                num_slices=num_slices,
+                hidden_channels=cca_hidden_channels,
+                num_layers=cca_num_layers,
+            )
+            if use_cca
+            else None
         )
 
     @property
@@ -131,6 +162,10 @@ class SliceEntropyCompressionModel(CompressionModel):
     def max_support_slices(self) -> int:
         return self.latent_codec.max_support_slices
 
+    @property
+    def use_cca(self) -> bool:
+        return self.cca_aux_entropy_model is not None
+
     def _hyper_priors(self, y: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         z = self.h_a(y)
         z_hat, z_likelihoods = self.entropy_bottleneck(z)
@@ -138,10 +173,24 @@ class SliceEntropyCompressionModel(CompressionModel):
         latent_scales = self.h_scale_s(z_hat)
         return z, z_likelihoods, latent_means, latent_scales
 
-    def _forward_latent(self, y: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+    def _forward_latent_output(self, y: Tensor) -> Dict[str, Dict[str, Tensor] | Tensor]:
         _, z_likelihoods, latent_means, latent_scales = self._hyper_priors(y)
         y_out = self.latent_codec(y, latent_means, latent_scales)
-        return y_out["y_hat"], y_out["likelihoods"]["y"], z_likelihoods
+        output: Dict[str, Dict[str, Tensor] | Tensor] = {
+            "y_hat": y_out["y_hat"],
+            "likelihoods": {"y": y_out["likelihoods"]["y"], "z": z_likelihoods},
+        }
+        if self.cca_aux_entropy_model is not None:
+            output["aux_likelihoods"] = self.cca_aux_entropy_model(
+                y,
+                latent_means,
+                latent_scales,
+            )
+        return output
+
+    def _forward_latent(self, y: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+        output = self._forward_latent_output(y)
+        return output["y_hat"], output["likelihoods"]["y"], output["likelihoods"]["z"]
 
     def _compress_latent(self, y: Tensor) -> Dict[str, object]:
         z = self.h_a(y)

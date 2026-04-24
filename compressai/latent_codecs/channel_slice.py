@@ -84,6 +84,8 @@ class ChannelSliceLatentCodec(LatentCodec):
         cc_scale_transforms: nn.ModuleList,
         lrp_transforms: Optional[nn.ModuleList] = None,
         gaussian_conditional: Optional[GaussianConditional] = None,
+        mean_support_transforms: Optional[nn.ModuleList] = None,
+        scale_support_transforms: Optional[nn.ModuleList] = None,
         *,
         num_slices: Optional[int] = None,
         max_support_slices: int = -1,
@@ -106,6 +108,10 @@ class ChannelSliceLatentCodec(LatentCodec):
             raise ValueError("cc_scale_transforms must have num_slices entries")
         if lrp_transforms is not None and len(lrp_transforms) != num_slices:
             raise ValueError("lrp_transforms must have num_slices entries")
+        if mean_support_transforms is not None and len(mean_support_transforms) != num_slices:
+            raise ValueError("mean_support_transforms must have num_slices entries")
+        if scale_support_transforms is not None and len(scale_support_transforms) != num_slices:
+            raise ValueError("scale_support_transforms must have num_slices entries")
         if quantizer not in ("ste", "noise"):
             raise ValueError(f"unknown quantizer {quantizer!r}")
 
@@ -115,6 +121,12 @@ class ChannelSliceLatentCodec(LatentCodec):
         self.lrp_scale = float(lrp_scale)
         self.cc_mean_transforms = cc_mean_transforms
         self.cc_scale_transforms = cc_scale_transforms
+        self.mean_support_transforms = mean_support_transforms or nn.ModuleList(
+            nn.Identity() for _ in range(num_slices)
+        )
+        self.scale_support_transforms = scale_support_transforms or nn.ModuleList(
+            nn.Identity() for _ in range(num_slices)
+        )
         self.lrp_transforms = lrp_transforms or nn.ModuleList(
             nn.Identity() for _ in range(num_slices)
         )
@@ -135,9 +147,11 @@ class ChannelSliceLatentCodec(LatentCodec):
     ) -> Tuple[Tensor, Tensor, Tensor]:
         support = self._support_slices(y_hat_slices)
         mean_support = torch.cat([latent_means, *support], dim=1)
+        mean_support = self.mean_support_transforms[slice_index](mean_support)
         mu = self.cc_mean_transforms[slice_index](mean_support)
         mu = mu[:, :, : spatial_shape[0], : spatial_shape[1]]
         scale_support = torch.cat([latent_scales, *support], dim=1)
+        scale_support = self.scale_support_transforms[slice_index](scale_support)
         scale = self.cc_scale_transforms[slice_index](scale_support)
         scale = scale[:, :, : spatial_shape[0], : spatial_shape[1]]
         return mu, scale, mean_support

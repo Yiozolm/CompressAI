@@ -35,6 +35,7 @@ from .entropy_models import (
 )
 from .entropy_models_vbr import EntropyBottleneckVbr, EntropyModelVbr
 from .gaussian_conditional_shifted import GsnConditionalLocScaleShift, Scaler
+from .cca import CausalContextAdjustmentEntropyModel
 
 __all__ = [
     "EntropyModel",
@@ -43,6 +44,7 @@ __all__ = [
     "GaussianMixtureConditional",
     "GsnConditionalLocScaleShift",
     "Scaler",
+    "CausalContextAdjustmentEntropyModel",
     "EntropyModelVbr",
     "EntropyBottleneckVbr",
 ]

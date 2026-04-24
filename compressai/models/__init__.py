@@ -28,11 +28,18 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from .base import *
+from .cmic import *
+from .dcae import *
+from .ftic import *
 from .glic import *
 from .google import *
+from .invcompress import *
 from .mlicpp import *
 from .pointcloud import *
+from .saaf import *
 from .sensetime import *
 from .stf import *
+from .tcm import *
 from .vbr import *
 from .waseda import *
+from .weconvene import *

@@ -60,17 +60,17 @@ def _make_scale_table(
     min_scale: float,
     scale_max: float,
     num_scales: int,
-) -> Tuple[float, ...]:
+) -> List[float]:
     if num_scales == 1:
-        return (float(min_scale),)
+        return [float(min_scale)]
 
     normalizer = scale_max / min_scale + 1.0
     log_min = math.log(min_scale)
     log_normalizer = math.log(normalizer)
-    return tuple(
+    return [
         math.exp(log_min + log_normalizer * index / (num_scales - 1))
         for index in range(num_scales)
-    )
+    ]
 
 
 class GsnConditionalLocScaleShift(GaussianConditional):

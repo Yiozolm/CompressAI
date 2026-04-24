@@ -17,15 +17,14 @@ from compressai.layers import (
     sequential_channel_ramp,
     subpel_conv3x3,
 )
+from compressai.layers.graph import GFA
 from compressai.layers.lic import (
-    GFA,
     GatedFFN,
     GatedTransformCNN,
     LayerNorm2d,
     OLP,
-    WLS,
-    iWLS,
 )
+from compressai.layers.wave import WLS, iWLS
 from compressai.models.utils import conv
 from compressai.registry import register_model
 

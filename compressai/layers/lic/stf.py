@@ -9,8 +9,8 @@ from timm.layers import DropPath
 from torch import Tensor
 
 from ..layers import conv1x1, conv3x3
-from .swin import PatchMerging, PatchSplit
-from .swin_attention import (
+from ..attn.swin import PatchMerging, PatchSplit
+from ..attn.swin_attention import (
     WindowAttention,
     _pad_to_window_size,
     build_window_attention_mask,
