@@ -35,6 +35,7 @@ import torch
 from packaging import version
 
 from compressai.entropy_models import (
+    CausalContextAdjustmentEntropyModel,
     EntropyBottleneck,
     EntropyModel,
     GaussianConditional,
@@ -490,6 +491,30 @@ class TestGaussianMixtureConditional:
         assert y_likelihoods.shape == x.shape
 
         assert (y == torch.round(x)).all()
+
+
+class TestCausalContextAdjustmentEntropyModel:
+    def test_forward(self):
+        model = CausalContextAdjustmentEntropyModel(
+            latent_channels=32,
+            num_slices=4,
+            hidden_channels=32,
+            num_layers=2,
+        )
+        y = torch.rand(1, 32, 4, 4)
+        latent_means = torch.rand(1, 32, 4, 4)
+        latent_scales = torch.rand(1, 32, 4, 4)
+
+        out = model(y, latent_means, latent_scales)
+
+        assert "y_aux" in out
+        assert "y_cca" in out
+        assert out["y_aux"].shape == y.shape
+        assert out["y_cca"].shape == y.shape
+
+    def test_invalid_configuration(self):
+        with pytest.raises(ValueError):
+            CausalContextAdjustmentEntropyModel(latent_channels=30, num_slices=4)
 
 
 @pytest.mark.parametrize(

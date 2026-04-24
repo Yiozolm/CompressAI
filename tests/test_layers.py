@@ -36,7 +36,10 @@ from compressai.layers import (
     AttentionBlock,
     MaskedConv2d,
     QReLU,
+    GatedTransformCNN,
+    LayerNorm2d,
     ResidualBlock,
+    ResidualBottleneckBlock,
     ResidualBlockUpsample,
     ResidualBlockWithStride,
 )
@@ -197,6 +200,31 @@ def test_ResidualBlock():
 
     layer = ResidualBlock(8, 16)
     layer(torch.rand(1, 8, 4, 4))
+
+
+def test_ResidualBottleneckBlock():
+    layer = ResidualBottleneckBlock(8, 16)
+    output = layer(torch.rand(1, 8, 4, 4))
+
+    assert output.shape == (1, 16, 4, 4)
+
+
+def test_LayerNorm2d():
+    layer = LayerNorm2d(8)
+    input_tensor = torch.rand(1, 8, 4, 4, requires_grad=True)
+    output = layer(input_tensor)
+    output.backward(input_tensor)
+
+    assert output.shape == input_tensor.shape
+    assert input_tensor.grad is not None
+    assert input_tensor.grad.shape == input_tensor.shape
+
+
+def test_GatedTransformCNN():
+    layer = GatedTransformCNN(8, 16)
+    output = layer(torch.rand(1, 8, 4, 4))
+
+    assert output.shape == (1, 16, 4, 4)
 
 
 def test_AttentionBlock():

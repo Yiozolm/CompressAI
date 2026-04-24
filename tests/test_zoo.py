@@ -29,13 +29,24 @@
 
 import pytest
 
+from compressai.layers import is_freia_available, is_pytorch_wavelets_available
 from compressai.models import (
+    CMIC,
     Cheng2020Anchor,
     Cheng2020Attention,
+    DCAE,
     FactorizedPrior,
+    FrequencyAwareTransFormer,
+    InvCompress,
     JointAutoregressiveHierarchicalPriors,
+    MambaIC,
+    MambaVC,
+    MLICPlusPlus,
     MeanScaleHyperprior,
+    SAAF,
     ScaleHyperprior,
+    TCM,
+    WeConvene,
 )
 from compressai.zoo import (
     bmshj2018_factorized,
@@ -43,8 +54,19 @@ from compressai.zoo import (
     bmshj2018_hyperprior,
     cheng2020_anchor,
     cheng2020_attn,
+    candidate_model_architectures,
+    cmic,
+    dcae,
+    ftic,
+    invcompress,
+    mambaic,
+    mambavc,
+    mlicpp,
     mbt2018,
     mbt2018_mean,
+    saaf,
+    tcm,
+    weconvene,
 )
 from compressai.zoo.image import _load_model
 
@@ -56,6 +78,250 @@ class TestLoadModel:
 
         with pytest.raises(ValueError):
             _load_model("mbt2018", "mse", 0)
+
+
+class TestCandidateModels:
+    def test_cmic_missing_dependency(self):
+        if is_pytorch_wavelets_available():
+            pytest.skip("pytorch_wavelets is installed.")
+
+        assert candidate_model_architectures["cmic"] is None
+        with pytest.raises(ModuleNotFoundError, match="pytorch_wavelets"):
+            cmic()
+
+    @pytest.mark.skipif(
+        not is_pytorch_wavelets_available(),
+        reason="pytorch_wavelets is not installed",
+    )
+    def test_cmic(self):
+        net = cmic(
+            N=16,
+            M=32,
+            groups=[8, 8, 8, 8],
+            stage_dims=(16, 16, 24),
+            stage_depths=(1, 1),
+            num_heads=(4, 4),
+            d_state=4,
+            window_size=4,
+            cluster_num=16,
+        )
+
+        assert isinstance(net, CMIC)
+        assert candidate_model_architectures["cmic"] is CMIC
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            cmic(pretrained=True)
+
+    def test_mlicpp(self):
+        net = mlicpp(N=16, M=32, slice_num=4, context_window=3)
+
+        assert isinstance(net, MLICPlusPlus)
+        assert candidate_model_architectures["mlicpp"] is MLICPlusPlus
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            mlicpp(pretrained=True)
+
+    def test_tcm(self):
+        net = tcm(
+            config=[1, 1, 1, 1, 1, 1],
+            head_dim=[8, 8, 8, 8, 8, 8],
+            N=16,
+            M=32,
+            hyper_channels=16,
+            hyper_head_dim=8,
+            num_slices=4,
+            max_support_slices=2,
+        )
+
+        assert isinstance(net, TCM)
+        assert candidate_model_architectures["lic-tcm"] is TCM
+        assert candidate_model_architectures["tcm"] is TCM
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            tcm(pretrained=True)
+
+    @pytest.mark.skipif(
+        not is_pytorch_wavelets_available(),
+        reason="pytorch_wavelets is not installed",
+    )
+    def test_tcm_with_auxt(self):
+        net = tcm(
+            config=[1, 1, 1, 1, 1, 1],
+            head_dim=[8, 8, 8, 8, 8, 8],
+            N=16,
+            M=32,
+            hyper_channels=16,
+            hyper_head_dim=8,
+            num_slices=4,
+            max_support_slices=2,
+            use_auxt=True,
+        )
+
+        assert isinstance(net, TCM)
+        assert net.use_auxt
+        assert candidate_model_architectures["lic-tcm"] is TCM
+
+    def test_weconvene_missing_dependency(self):
+        if is_pytorch_wavelets_available():
+            pytest.skip("pytorch_wavelets is installed.")
+
+        assert candidate_model_architectures["weconvene"] is None
+        with pytest.raises(ModuleNotFoundError, match="pytorch_wavelets"):
+            weconvene()
+
+    @pytest.mark.skipif(
+        not is_pytorch_wavelets_available(),
+        reason="pytorch_wavelets is not installed",
+    )
+    def test_weconvene(self):
+        net = weconvene(
+            N=16,
+            M=32,
+            hyper_channels=16,
+            num_slices=4,
+            max_support_slices=2,
+            support_window_size=4,
+            support_head_dim=4,
+            support_attention_dim=16,
+        )
+
+        assert isinstance(net, WeConvene)
+        assert candidate_model_architectures["weconvene"] is WeConvene
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            weconvene(pretrained=True)
+
+    def test_dcae(self):
+        net = dcae(
+            head_dim=[8, 8, 8, 8, 8, 8],
+            N=16,
+            M=32,
+            hyper_channels=16,
+            num_slices=4,
+            max_support_slices=2,
+            feature_dims=(16, 16, 32),
+            block_num=(1, 1, 1),
+            dict_num=16,
+            dict_head_num=4,
+            window_size=4,
+            hyper_window_size=2,
+            hyper_head_dim=8,
+        )
+
+        assert isinstance(net, DCAE)
+        assert candidate_model_architectures["dcae"] is DCAE
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            dcae(pretrained=True)
+
+    def test_ftic(self):
+        net = ftic(
+            config=(1, 1, 1, 1, 1, 1),
+            num_heads=(4, 4, 8, 8, 4, 4),
+            feature_dims=(16, 24, 32),
+            hyper_hidden_channels=32,
+            hyper_channels=16,
+            M=32,
+            num_slices=4,
+            hyper_num_heads=8,
+            tca_depth=2,
+            tca_ratio=2,
+            tca_num_heads=16,
+            window_size=4,
+            fm_window_size=8,
+            hyper_window_size=2,
+            hyper_fm_window_size=4,
+        )
+
+        assert isinstance(net, FrequencyAwareTransFormer)
+        assert candidate_model_architectures["ftic"] is FrequencyAwareTransFormer
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            ftic(pretrained=True)
+
+    def test_saaf(self):
+        net = saaf(
+            head_dim=[8, 8, 8, 8, 8, 8],
+            N=16,
+            M=32,
+            hyper_channels=16,
+            num_slices=4,
+            max_support_slices=2,
+            feature_dims=(16, 16, 32),
+            block_num=(1, 1, 1),
+            dict_num=16,
+            dict_head_num=4,
+            window_size=4,
+            hyper_window_size=2,
+            hyper_head_dim=8,
+        )
+
+        assert isinstance(net, SAAF)
+        assert candidate_model_architectures["saaf"] is SAAF
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            saaf(pretrained=True)
+
+    def test_invcompress_missing_dependency(self):
+        if is_freia_available():
+            pytest.skip("FrEIA is installed.")
+
+        assert candidate_model_architectures["invcompress"] is None
+        with pytest.raises(ModuleNotFoundError, match="FrEIA"):
+            invcompress()
+
+    @pytest.mark.skipif(not is_freia_available(), reason="FrEIA is not installed")
+    def test_invcompress(self):
+        net = invcompress(N=192)
+
+        assert isinstance(net, InvCompress)
+        assert candidate_model_architectures["invcompress"] is InvCompress
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            invcompress(pretrained=True)
+
+    def test_mambaic(self):
+        net = mambaic(
+            depths=(1, 1, 1, 1),
+            N=16,
+            M=32,
+            hyper_channels=16,
+            num_slices=4,
+            max_support_slices=2,
+            context_depths=(1, 1, 1, 1),
+            window_size=4,
+            support_head_dim=8,
+            context_head_dim=4,
+            support_attention_dim=16,
+            context_attention_dim=16,
+            ssm_d_state=4,
+        )
+
+        assert isinstance(net, MambaIC)
+        assert candidate_model_architectures["mambaic"] is MambaIC
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            mambaic(pretrained=True)
+
+    def test_mambavc(self):
+        net = mambavc(
+            depths=(1, 1, 1, 1),
+            N=16,
+            M=32,
+            hyper_channels=16,
+            num_slices=4,
+            max_support_slices=2,
+            window_size=4,
+            support_head_dim=8,
+            support_attention_dim=16,
+            ssm_d_state=4,
+        )
+
+        assert isinstance(net, MambaVC)
+        assert candidate_model_architectures["mambavc"] is MambaVC
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            mambavc(pretrained=True)
 
 
 class TestBmshj2018Factorized:
