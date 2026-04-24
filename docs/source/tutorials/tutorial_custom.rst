@@ -138,7 +138,7 @@ and some helper methods, let's rewrite our network:
 .. code-block:: python
 
      from compressai.models import CompressionModel
-     from compressai.models.utils import conv, deconv
+     from compressai.layers import conv, deconv
 
      class Network(CompressionModel):
          def __init__(self, N=128):

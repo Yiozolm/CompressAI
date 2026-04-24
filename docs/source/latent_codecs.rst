@@ -33,6 +33,10 @@ CompressAI provides the following predefined :py:class:`~LatentCodec` subclasses
      - Like :py:class:`~HyperpriorLatentCodec`, but with trainable gain vectors for ``y``.
    * - :py:class:`~ChannelGroupsLatentCodec`
      - Encodes ``y`` in multiple chunked groups, each group conditioned on previously encoded groups.
+   * - :py:class:`~ChannelSliceLatentCodec`
+     - Like :py:class:`~ChannelGroupsLatentCodec`, but with equal-sized slices, separate per-slice ``cc_mean_transforms`` / ``cc_scale_transforms`` heads, and a built-in latent residual prediction (LRP) refinement step. Used by STF / WACNN and other Minnen2020-style models.
+   * - :py:class:`~MLICPlusPlusLatentCodec`
+     - MLIC++ multi-reference entropy model with a hyperprior, equal channel slices, checkerboard anchor/nonanchor coding, local/channel/global contexts, and separate LRP heads.
    * - :py:class:`~CheckerboardLatentCodec`
      - Encodes ``y`` in two passes in checkerboard order.
 
@@ -341,7 +345,16 @@ ChannelGroupsLatentCodec
 .. autoclass:: ChannelGroupsLatentCodec
 
 
+ChannelSliceLatentCodec
+-----------------------
+.. autoclass:: ChannelSliceLatentCodec
+
+
+MLICPlusPlusLatentCodec
+-----------------------
+.. autoclass:: MLICPlusPlusLatentCodec
+
+
 CheckerboardLatentCodec
 -----------------------
 .. autoclass:: CheckerboardLatentCodec
-
