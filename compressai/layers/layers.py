@@ -46,7 +46,9 @@ __all__ = [
     "ResidualBlock",
     "ResidualBlockUpsample",
     "ResidualBlockWithStride",
+    "conv",
     "conv1x1",
+    "deconv",
     "SpectralConv2d",
     "SpectralConvTranspose2d",
     "conv3x3",
@@ -185,6 +187,39 @@ def subpel_conv3x3(in_ch: int, out_ch: int, r: int = 1) -> nn.Sequential:
 def conv1x1(in_ch: int, out_ch: int, stride: int = 1) -> nn.Module:
     """1x1 convolution."""
     return nn.Conv2d(in_ch, out_ch, kernel_size=1, stride=stride)
+
+
+def conv(
+    in_channels: int,
+    out_channels: int,
+    kernel_size: int = 5,
+    stride: int = 2,
+) -> nn.Conv2d:
+    """k×k convolution with `kernel_size // 2` padding."""
+    return nn.Conv2d(
+        in_channels,
+        out_channels,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=kernel_size // 2,
+    )
+
+
+def deconv(
+    in_channels: int,
+    out_channels: int,
+    kernel_size: int = 5,
+    stride: int = 2,
+) -> nn.ConvTranspose2d:
+    """k×k transposed convolution with matching output padding."""
+    return nn.ConvTranspose2d(
+        in_channels,
+        out_channels,
+        kernel_size=kernel_size,
+        stride=stride,
+        output_padding=stride - 1,
+        padding=kernel_size // 2,
+    )
 
 
 class ResidualBlockWithStride(nn.Module):

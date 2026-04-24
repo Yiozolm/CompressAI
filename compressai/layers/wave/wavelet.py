@@ -14,7 +14,7 @@ except ModuleNotFoundError as error:
 else:
     _PYTORCH_WAVELETS_IMPORT_ERROR = None
 
-from .blocks import OLP
+from ..lic.blocks import OLP
 
 __all__ = [
     "DWT2D",
