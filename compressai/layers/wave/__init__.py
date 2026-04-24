@@ -10,6 +10,10 @@ from .wavelet import (
 from .weconv import (
     WaveletResidualBlockUpsample,
     WaveletResidualBlockWithStride,
+    WeConveneAnalysisTransform,
+    WeConveneHyperAnalysisTransform,
+    WeConveneHyperSynthesisTransform,
+    WeConveneSynthesisTransform,
 )
 
 __all__ = [
@@ -22,4 +26,8 @@ __all__ = [
     "is_pytorch_wavelets_available",
     "WaveletResidualBlockUpsample",
     "WaveletResidualBlockWithStride",
+    "WeConveneAnalysisTransform",
+    "WeConveneHyperAnalysisTransform",
+    "WeConveneHyperSynthesisTransform",
+    "WeConveneSynthesisTransform",
 ]

@@ -1,3 +1,8 @@
+from .inference import (
+    infer_swatten_attention_dim,
+    infer_swatten_head_dim,
+    infer_swatten_window_size,
+)
 from .swin import (
     Block,
     ConvTransBlock,
@@ -28,6 +33,9 @@ __all__ = [
     "Win_noShift_Attention",
     "WindowAttention",
     "build_window_attention_mask",
+    "infer_swatten_attention_dim",
+    "infer_swatten_head_dim",
+    "infer_swatten_window_size",
     "window_partition",
     "window_reverse",
 ]

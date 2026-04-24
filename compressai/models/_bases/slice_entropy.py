@@ -1,3 +1,10 @@
+"""Slice-conditional entropy backbone shared by WACNN / SymmetricalTransFormer / MambaVC.
+
+Promoted out of the historical ``models/stf_support.py`` so the abstract base
+class is discoverable by name. Channel-counting helpers and a parameterised
+entropy-transform factory live here too — they used to be duplicated across
+``stf_support`` / ``ssm_support`` / ``weconvene_support``.
+"""
 from __future__ import annotations
 
 from typing import Dict, Optional, Sequence, Tuple
@@ -11,27 +18,76 @@ from compressai.entropy_models import (
     EntropyBottleneck,
 )
 from compressai.latent_codecs import ChannelSliceLatentCodec
-from compressai.models.utils import conv
+from compressai.layers import conv
 
-from .base import CompressionModel
+from ..base import CompressionModel
 
 __all__ = [
     "SliceEntropyCompressionModel",
     "infer_max_support_slices",
     "infer_num_slices",
+    "lrp_support_channels",
+    "make_entropy_transform",
+    "slice_support_channels",
 ]
 
 
-_CC_TRANSFORM_KEY_PREFIX = "latent_codec.cc_mean_transforms."
-_CC_TRANSFORM_KEY_SUFFIX = ".0.weight"
+_DEFAULT_NUM_SLICES_PREFIX = "latent_codec.cc_mean_transforms."
+_KEY_SUFFIX = ".0.weight"
 
 
-def infer_num_slices(state_dict: Dict[str, Tensor]) -> int:
+def slice_support_channels(
+    latent_channels: int,
+    slice_channels: int,
+    index: int,
+    max_support_slices: int,
+) -> int:
+    if max_support_slices < 0:
+        return latent_channels + slice_channels * index
+    return latent_channels + slice_channels * min(index, max_support_slices)
+
+
+def lrp_support_channels(
+    latent_channels: int,
+    slice_channels: int,
+    index: int,
+    max_support_slices: int,
+) -> int:
+    if max_support_slices < 0:
+        return latent_channels + slice_channels * (index + 1)
+    return latent_channels + slice_channels * min(index + 1, max_support_slices + 1)
+
+
+def make_entropy_transform(
+    in_channels: int,
+    out_channels: int,
+    *,
+    widths: Sequence[int] = (224, 128),
+) -> nn.Sequential:
+    """Stack of stride-1 3x3 convs with GELU between, used by every slice
+    entropy model. ``widths`` specifies hidden conv widths; defaults to the
+    Mamba/WeConvene 3-conv stack. Pass ``widths=(224, 176, 128, 64)`` for the
+    STF/WACNN 5-conv stack."""
+    layers: list[nn.Module] = []
+    prev = in_channels
+    for width in widths:
+        layers.append(conv(prev, width, stride=1, kernel_size=3))
+        layers.append(nn.GELU())
+        prev = width
+    layers.append(conv(prev, out_channels, stride=1, kernel_size=3))
+    return nn.Sequential(*layers)
+
+
+def infer_num_slices(
+    state_dict: Dict[str, Tensor],
+    *,
+    prefix: str = _DEFAULT_NUM_SLICES_PREFIX,
+    suffix: str = _KEY_SUFFIX,
+) -> int:
     slice_indices = {
-        int(key[len(_CC_TRANSFORM_KEY_PREFIX) :].split(".", 1)[0])
+        int(key[len(prefix) :].split(".", 1)[0])
         for key in state_dict
-        if key.startswith(_CC_TRANSFORM_KEY_PREFIX)
-        and key.endswith(_CC_TRANSFORM_KEY_SUFFIX)
+        if key.startswith(prefix) and key.endswith(suffix)
     }
     return len(slice_indices)
 
@@ -40,35 +96,30 @@ def infer_max_support_slices(
     state_dict: Dict[str, Tensor],
     latent_channels: int,
     num_slices: int,
+    *,
+    prefix: str = _DEFAULT_NUM_SLICES_PREFIX,
+    suffix: str = _KEY_SUFFIX,
+    extra_factor: int = 1,
 ) -> int:
+    """Infer ``max_support_slices`` from the input width of the first
+    cc_mean transform conv. ``extra_factor`` accounts for models like DCAE/SAAF
+    that prepend additional copies of the latent (``M*3 + slice_channels*N``);
+    pass ``extra_factor=3`` there. Slice-only models (STF/Mamba*) keep the
+    default ``extra_factor=1``."""
     slice_channels = latent_channels // num_slices
-    max_input_channels = max(
+    matching = [
         tensor.size(1)
         for key, tensor in state_dict.items()
-        if key.startswith(_CC_TRANSFORM_KEY_PREFIX)
-        and key.endswith(_CC_TRANSFORM_KEY_SUFFIX)
-    )
-    return max(0, (max_input_channels - latent_channels) // slice_channels)
-
-
-def _make_cc_transform(
-    in_channels: int, out_channels: int
-) -> nn.Sequential:
-    return nn.Sequential(
-        conv(in_channels, 224, stride=1, kernel_size=3),
-        nn.GELU(),
-        conv(224, 176, stride=1, kernel_size=3),
-        nn.GELU(),
-        conv(176, 128, stride=1, kernel_size=3),
-        nn.GELU(),
-        conv(128, 64, stride=1, kernel_size=3),
-        nn.GELU(),
-        conv(64, out_channels, stride=1, kernel_size=3),
-    )
+        if key.startswith(prefix) and key.endswith(suffix)
+    ]
+    if not matching:
+        return 0
+    max_input_channels = max(matching)
+    return max(0, (max_input_channels - extra_factor * latent_channels) // slice_channels)
 
 
 class SliceEntropyCompressionModel(CompressionModel):
-    """Channel-conditional entropy backbone shared by WACNN and SymmetricalTransFormer.
+    """Channel-conditional entropy backbone shared by WACNN, SymmetricalTransFormer, MambaVC.
 
     Subclasses must populate ``g_a``, ``g_s``, ``h_a``, ``h_mean_s`` and
     ``h_scale_s``, then call :meth:`_init_slice_entropy` to wire up the
@@ -109,25 +160,34 @@ class SliceEntropyCompressionModel(CompressionModel):
             raise ValueError("scale_support_transforms must have num_slices entries")
 
         slice_channels = latent_channels // num_slices
+        widths = (224, 176, 128, 64)
         cc_mean_transforms = nn.ModuleList(
-            _make_cc_transform(
-                latent_channels + slice_channels * min(index, max_support_slices),
+            make_entropy_transform(
+                slice_support_channels(
+                    latent_channels, slice_channels, index, max_support_slices
+                ),
                 slice_channels,
+                widths=widths,
             )
             for index in range(num_slices)
         )
         cc_scale_transforms = nn.ModuleList(
-            _make_cc_transform(
-                latent_channels + slice_channels * min(index, max_support_slices),
+            make_entropy_transform(
+                slice_support_channels(
+                    latent_channels, slice_channels, index, max_support_slices
+                ),
                 slice_channels,
+                widths=widths,
             )
             for index in range(num_slices)
         )
         lrp_transforms = nn.ModuleList(
-            _make_cc_transform(
-                latent_channels
-                + slice_channels * min(index + 1, max_support_slices + 1),
+            make_entropy_transform(
+                lrp_support_channels(
+                    latent_channels, slice_channels, index, max_support_slices
+                ),
                 slice_channels,
+                widths=widths,
             )
             for index in range(num_slices)
         )

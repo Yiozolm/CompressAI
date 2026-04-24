@@ -51,13 +51,19 @@ from .mlic import (
     SynthesisTransform,
 )
 from .cmic import (
+    CMICAnalysisTransform,
     CMICChannelContextBlock,
     CMICSpatialContextBlock,
     CMICStage,
+    CMICSynthesisTransform,
 )
 from .ftic import (
     BranchWindowAttention,
     FATBlock,
+    FTICAnalysisTransform,
+    FTICHyperAnalysisTransform,
+    FTICHyperSynthesisTransform,
+    FTICSynthesisTransform,
     SwinFDWA,
     WindowFrequencyModulation,
 )
@@ -106,9 +112,11 @@ __all__ = [
     "SynthesisTransform",
     "AnalysisTransform",
     "ChannelContext",
+    "CMICAnalysisTransform",
     "CMICChannelContextBlock",
     "CMICSpatialContextBlock",
     "CMICStage",
+    "CMICSynthesisTransform",
     "BranchWindowAttention",
     "build_freia_coupling_layer",
     "build_freia_invertible_conv",
@@ -117,6 +125,10 @@ __all__ = [
     "ConvPositionalEncoding",
     "EntropyParameters",
     "FATBlock",
+    "FTICAnalysisTransform",
+    "FTICHyperAnalysisTransform",
+    "FTICHyperSynthesisTransform",
+    "FTICSynthesisTransform",
     "is_freia_available",
     "MaskedSliceChannelAttention",
     "SwinFDWA",

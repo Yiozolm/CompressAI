@@ -1,3 +1,11 @@
+"""Dictionary-based slice entropy backbone shared by DCAE / SAAF.
+
+Promoted out of the historical ``models/dcae_support.py``. The base class now
+exposes ``_init_dictionary_entropy`` so DCAE/SAAF no longer need to inline the
+identical ``cc_mean / cc_scale / lrp`` ladder construction. State-dict
+introspection helpers stay alongside since both consumers' ``from_state_dict``
+implementations call them.
+"""
 from __future__ import annotations
 
 from typing import Dict, List, Sequence, Tuple, Union
@@ -10,7 +18,12 @@ from torch import Tensor
 from compressai.ans import BufferedRansEncoder, RansDecoder
 from compressai.entropy_models import EntropyBottleneck, GaussianConditional
 
-from .base import CompressionModel
+from ..base import CompressionModel
+from .slice_entropy import (
+    lrp_support_channels,
+    make_entropy_transform,
+    slice_support_channels,
+)
 
 __all__ = [
     "DictionaryEntropyCompressionModel",
@@ -90,6 +103,15 @@ def infer_window_size(state_dict: Dict[str, Tensor], prefix: str) -> int:
 
 
 class DictionaryEntropyCompressionModel(CompressionModel):
+    """Dictionary-conditional channel-autoregressive entropy backbone.
+
+    Subclasses must populate ``g_a`` / ``g_s`` / ``h_a`` / ``h_z_s1`` /
+    ``h_z_s2`` / ``dt`` / ``dt_cross_attention`` and then call
+    :meth:`_init_dictionary_entropy` to wire up the per-slice cc_mean /
+    cc_scale / lrp ladders plus the ``z`` entropy bottleneck and Gaussian
+    conditional.
+    """
+
     h_a: nn.Module
     h_z_s1: nn.Module
     h_z_s2: nn.Module
@@ -102,6 +124,55 @@ class DictionaryEntropyCompressionModel(CompressionModel):
     dt: nn.Parameter
     num_slices: int
     max_support_slices: int
+
+    def _init_dictionary_entropy(
+        self,
+        *,
+        M: int,
+        num_slices: int,
+        max_support_slices: int,
+        hyper_channels: int,
+    ) -> None:
+        if M % num_slices != 0:
+            raise ValueError("M must be divisible by num_slices")
+
+        slice_channels = M // num_slices
+        # Each slice's per-pixel support is the concat of (latent_means,
+        # latent_scales, *prior_y_hat_slices, dictionary_info). The first
+        # three plus dictionary_info amount to ``M * 3`` channels regardless
+        # of slice index; the prior y_hat slices contribute ``slice_channels
+        # * support_count``.
+        support_offset = M * 3
+        self.cc_mean_transforms = nn.ModuleList(
+            make_entropy_transform(
+                slice_support_channels(
+                    support_offset, slice_channels, index, max_support_slices
+                ),
+                slice_channels,
+            )
+            for index in range(num_slices)
+        )
+        self.cc_scale_transforms = nn.ModuleList(
+            make_entropy_transform(
+                slice_support_channels(
+                    support_offset, slice_channels, index, max_support_slices
+                ),
+                slice_channels,
+            )
+            for index in range(num_slices)
+        )
+        self.lrp_transforms = nn.ModuleList(
+            make_entropy_transform(
+                lrp_support_channels(
+                    support_offset, slice_channels, index, max_support_slices
+                ),
+                slice_channels,
+            )
+            for index in range(num_slices)
+        )
+
+        self.entropy_bottleneck = EntropyBottleneck(hyper_channels)
+        self.gaussian_conditional = GaussianConditional(None)
 
     def _support_slices(self, y_hat_slices: Sequence[Tensor]) -> List[Tensor]:
         if self.max_support_slices < 0:

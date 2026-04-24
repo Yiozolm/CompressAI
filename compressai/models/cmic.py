@@ -18,8 +18,10 @@ from compressai.latent_codecs import (
 )
 from compressai.layers import sequential_channel_ramp, subpel_conv3x3
 from compressai.layers.lic import (
+    CMICAnalysisTransform,
     CMICChannelContextBlock,
     CMICSpatialContextBlock,
+    CMICSynthesisTransform,
     GatedTransformCNN,
     OLP,
 )
@@ -28,7 +30,6 @@ from compressai.models.utils import conv
 from compressai.registry import register_model
 
 from .base import SimpleVAECompressionModel
-from .cmic_support import CMICAnalysisTransform, CMICSynthesisTransform
 
 __all__ = ["CMIC", "CMICAnalysisTransform", "CMICSynthesisTransform"]
 

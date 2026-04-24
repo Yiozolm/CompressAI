@@ -8,26 +8,62 @@ import torch.nn as nn
 from torch import Tensor
 
 from compressai.entropy_models import EntropyBottleneck, GsnConditionalLocScaleShift
-from compressai.layers.lic import TCAEntropyModel
-from compressai.registry import register_model
-
-from .base import CompressionModel
-from .ftic_support import (
+from compressai.layers.lic import (
     FTICAnalysisTransform,
     FTICHyperAnalysisTransform,
     FTICHyperSynthesisTransform,
     FTICSynthesisTransform,
-    infer_fm_window_size,
-    infer_ftic_num_heads,
-    infer_ftic_stage_depth,
-    infer_num_slices,
-    infer_tca_depth,
-    infer_tca_ratio,
-    infer_window_size,
+    TCAEntropyModel,
 )
+from compressai.registry import register_model
+
+from .base import CompressionModel
 from .utils import update_registered_buffers
 
 __all__ = ["FrequencyAwareTransFormer"]
+
+
+def _infer_ftic_stage_depth(state_dict: Dict[str, Tensor], prefix: str) -> int:
+    indices = {
+        int(key.split(".")[3])
+        for key in state_dict
+        if key.startswith(prefix) and ".conv1.weight" in key
+    }
+    return len(indices)
+
+
+def _infer_ftic_num_heads(state_dict: Dict[str, Tensor], prefix: str) -> int:
+    key = f"{prefix}.blocks.0.frequency_attention.branch_attentions.0.relative_position_bias_table"
+    return state_dict[key].size(1) * 4
+
+
+def _infer_window_size(state_dict: Dict[str, Tensor], prefix: str) -> int:
+    key = f"{prefix}.blocks.0.frequency_attention.branch_attentions.0.relative_position_bias_table"
+    table_size = state_dict[key].size(0)
+    return (int(round(table_size**0.5)) + 1) // 4
+
+
+def _infer_fm_window_size(state_dict: Dict[str, Tensor], prefix: str) -> int:
+    key = f"{prefix}.blocks.0.frequency_attention.frequency_modulation.complex_weight"
+    return state_dict[key].size(0)
+
+
+def _infer_num_slices(state_dict: Dict[str, Tensor], M: int) -> int:
+    start_token_channels = state_dict["tca.tca.start_token_from_hyperprior.weight"].size(0)
+    return M // start_token_channels
+
+
+def _infer_tca_depth(state_dict: Dict[str, Tensor]) -> int:
+    indices = {
+        int(key.split(".")[3])
+        for key in state_dict
+        if key.startswith("tca.tca.layers.") and ".q_proj.weight" in key
+    }
+    return len(indices)
+
+
+def _infer_tca_ratio(state_dict: Dict[str, Tensor], M: int) -> int:
+    return state_dict["tca.tca.lift.weight"].size(0) // M
 
 
 def ste_round(input_tensor: Tensor) -> Tensor:
@@ -264,20 +300,20 @@ class FrequencyAwareTransFormer(CompressionModel):
         dim2 = state_dict["g_a.stage2.tail.conv1.weight"].size(0)
         M = state_dict["g_a.stage3.tail.weight"].size(0)
         config = (
-            infer_ftic_stage_depth(state_dict, "g_a.stage1.blocks."),
-            infer_ftic_stage_depth(state_dict, "g_a.stage2.blocks."),
-            infer_ftic_stage_depth(state_dict, "g_a.stage3.blocks."),
-            infer_ftic_stage_depth(state_dict, "g_s.stage1.blocks."),
-            infer_ftic_stage_depth(state_dict, "g_s.stage2.blocks."),
-            infer_ftic_stage_depth(state_dict, "g_s.stage3.blocks."),
+            _infer_ftic_stage_depth(state_dict, "g_a.stage1.blocks."),
+            _infer_ftic_stage_depth(state_dict, "g_a.stage2.blocks."),
+            _infer_ftic_stage_depth(state_dict, "g_a.stage3.blocks."),
+            _infer_ftic_stage_depth(state_dict, "g_s.stage1.blocks."),
+            _infer_ftic_stage_depth(state_dict, "g_s.stage2.blocks."),
+            _infer_ftic_stage_depth(state_dict, "g_s.stage3.blocks."),
         )
         num_heads = (
-            infer_ftic_num_heads(state_dict, "g_a.stage1"),
-            infer_ftic_num_heads(state_dict, "g_a.stage2"),
-            infer_ftic_num_heads(state_dict, "g_a.stage3"),
-            infer_ftic_num_heads(state_dict, "g_s.stage1"),
-            infer_ftic_num_heads(state_dict, "g_s.stage2"),
-            infer_ftic_num_heads(state_dict, "g_s.stage3"),
+            _infer_ftic_num_heads(state_dict, "g_a.stage1"),
+            _infer_ftic_num_heads(state_dict, "g_a.stage2"),
+            _infer_ftic_num_heads(state_dict, "g_a.stage3"),
+            _infer_ftic_num_heads(state_dict, "g_s.stage1"),
+            _infer_ftic_num_heads(state_dict, "g_s.stage2"),
+            _infer_ftic_num_heads(state_dict, "g_s.stage3"),
         )
         net = cls(
             config=config,
@@ -286,19 +322,19 @@ class FrequencyAwareTransFormer(CompressionModel):
             hyper_hidden_channels=state_dict["h_a.input_block.conv1.weight"].size(0),
             hyper_channels=state_dict["entropy_bottleneck.quantiles"].size(0),
             M=M,
-            num_slices=infer_num_slices(state_dict, M),
+            num_slices=_infer_num_slices(state_dict, M),
             num_scales=state_dict["gaussian_conditional.scale_table"].numel(),
             num_means=state_dict["gaussian_conditional._prior_mean"].size(0)
             if state_dict["gaussian_conditional._prior_mean"].numel() > 0
             else 100,
             min_scale=float(state_dict["gaussian_conditional.scale_bound"].item()),
-            window_size=infer_window_size(state_dict, "g_a.stage1"),
-            fm_window_size=infer_fm_window_size(state_dict, "g_a.stage1"),
-            hyper_window_size=infer_window_size(state_dict, "h_a.stage"),
-            hyper_fm_window_size=infer_fm_window_size(state_dict, "h_a.stage"),
-            hyper_num_heads=infer_ftic_num_heads(state_dict, "h_a.stage"),
-            tca_depth=infer_tca_depth(state_dict),
-            tca_ratio=infer_tca_ratio(state_dict, M),
+            window_size=_infer_window_size(state_dict, "g_a.stage1"),
+            fm_window_size=_infer_fm_window_size(state_dict, "g_a.stage1"),
+            hyper_window_size=_infer_window_size(state_dict, "h_a.stage"),
+            hyper_fm_window_size=_infer_fm_window_size(state_dict, "h_a.stage"),
+            hyper_num_heads=_infer_ftic_num_heads(state_dict, "h_a.stage"),
+            tca_depth=_infer_tca_depth(state_dict),
+            tca_ratio=_infer_tca_ratio(state_dict, M),
         )
         if "gaussian_conditional._prior_mean" in state_dict:
             update_registered_buffers(

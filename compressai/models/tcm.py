@@ -31,7 +31,7 @@ from compressai.layers.attn import ConvTransBlock, SWAtten
 from compressai.registry import register_model
 
 from .base import CompressionModel
-from .stf_support import infer_max_support_slices, infer_num_slices
+from ._bases import infer_max_support_slices, infer_num_slices
 from .utils import conv
 
 __all__ = ["TCM"]

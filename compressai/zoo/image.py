@@ -29,14 +29,28 @@
 
 from torch.hub import load_state_dict_from_url
 
+from compressai.layers import is_freia_available, is_pytorch_wavelets_available
 from compressai.models import (
+    CMIC,
     Cheng2020Anchor,
     Cheng2020Attention,
+    DCAE,
     FactorizedPrior,
     FactorizedPriorReLU,
+    FrequencyAwareTransFormer,
+    GLIC,
+    InvCompress,
+    MambaIC,
+    MambaVC,
     JointAutoregressiveHierarchicalPriors,
+    MLICPlusPlus,
     MeanScaleHyperprior,
+    SAAF,
     ScaleHyperprior,
+    SymmetricalTransFormer,
+    TCM,
+    WeConvene,
+    WACNN,
 )
 
 from .pretrained import load_pretrained
@@ -45,10 +59,25 @@ __all__ = [
     "bmshj2018_factorized",
     "bmshj2018_factorized_relu",
     "bmshj2018_hyperprior",
+    "cmic",
+    "dcae",
+    "ftic",
+    "glic",
+    "invcompress",
+    "mambaic",
+    "mambavc",
+    "mlicpp",
+    "saaf",
+    "stf",
+    "stf_wacnn",
+    "tcm",
+    "weconvene",
     "mbt2018",
     "mbt2018_mean",
     "cheng2020_anchor",
     "cheng2020_attn",
+    "candidate_model_architectures",
+    "candidate_model_urls",
 ]
 
 model_architectures = {
@@ -59,6 +88,24 @@ model_architectures = {
     "mbt2018": JointAutoregressiveHierarchicalPriors,
     "cheng2020-anchor": Cheng2020Anchor,
     "cheng2020-attn": Cheng2020Attention,
+}
+
+candidate_model_architectures = {
+    "glic": GLIC,
+    "cmic": CMIC if is_pytorch_wavelets_available() else None,
+    "mlicpp": MLICPlusPlus,
+    "stf-wacnn": WACNN,
+    "stf": SymmetricalTransFormer,
+    "lic-tcm": TCM,
+    "tcm": TCM,
+    "dcae": DCAE,
+    "saaf": SAAF,
+    "weconvene": WeConvene if is_pytorch_wavelets_available() else None,
+    "ftic": FrequencyAwareTransFormer,
+    "invcompress": InvCompress if is_freia_available() else None,
+    "cca": None,
+    "mambaic": MambaIC,
+    "mambavc": MambaVC,
 }
 
 root_url = "https://compressai.s3.amazonaws.com/models/v1"
@@ -189,6 +236,8 @@ model_urls = {
     },
 }
 
+candidate_model_urls = {name: {} for name in candidate_model_architectures}
+
 cfgs = {
     "bmshj2018-factorized": {
         1: (128, 192),
@@ -284,6 +333,112 @@ def _load_model(
 
     model = model_architectures[architecture](*cfgs[architecture][quality], **kwargs)
     return model
+
+
+def glic(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return GLIC(**kwargs)
+
+
+def cmic(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    if not is_pytorch_wavelets_available():
+        raise ModuleNotFoundError(
+            "CMIC requires the optional dependency `pytorch_wavelets`. "
+            "Install `compressai[lic]` to enable this model."
+        )
+    return CMIC(**kwargs)
+
+
+def dcae(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return DCAE(**kwargs)
+
+
+def ftic(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return FrequencyAwareTransFormer(**kwargs)
+
+
+def invcompress(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    if not is_freia_available():
+        raise ModuleNotFoundError(
+            "InvCompress requires the optional dependency `FrEIA`. "
+            "Install `compressai[invcompress]` to enable this model."
+        )
+    return InvCompress(**kwargs)
+
+
+def mambaic(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return MambaIC(**kwargs)
+
+
+def mambavc(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return MambaVC(**kwargs)
+
+
+def mlicpp(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return MLICPlusPlus(**kwargs)
+
+
+def saaf(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return SAAF(**kwargs)
+
+
+def stf_wacnn(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return WACNN(**kwargs)
+
+
+def stf(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return SymmetricalTransFormer(**kwargs)
+
+
+def tcm(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return TCM(**kwargs)
+
+
+def weconvene(pretrained: bool = False, progress: bool = True, **kwargs):
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    if not is_pytorch_wavelets_available():
+        raise ModuleNotFoundError(
+            "WeConvene requires the optional dependency `pytorch_wavelets`. "
+            "Install `compressai[lic]` to enable this model."
+        )
+    return WeConvene(**kwargs)
 
 
 def bmshj2018_factorized(

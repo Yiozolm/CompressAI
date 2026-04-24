@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-
 from typing import Dict, Optional, Sequence, Tuple
 
 import torch
@@ -12,52 +10,30 @@ from torch import Tensor
 from compressai.entropy_models import EntropyBottleneck
 from compressai.latent_codecs import MambaICLatentCodec
 from compressai.layers import CheckerboardMaskedConv2d
-from compressai.layers.attn import SWAtten
-from compressai.registry import register_model
-
-from .base import CompressionModel
-from .ssm_support import (
+from compressai.layers.attn import (
+    SWAtten,
+    infer_swatten_attention_dim,
+    infer_swatten_head_dim,
+    infer_swatten_window_size,
+)
+from compressai.layers.ssm import (
     build_vss_backbone,
     build_vss_context_stage,
     infer_vss_block_kwargs,
     infer_vss_depths,
+)
+from compressai.models._bases import (
+    infer_max_support_slices,
+    infer_num_slices,
     lrp_support_channels,
     make_entropy_transform,
     slice_support_channels,
 )
-from .stf_support import infer_max_support_slices, infer_num_slices
+from compressai.registry import register_model
+
+from .base import CompressionModel
 
 __all__ = ["MambaIC"]
-
-
-def _infer_window_size(state_dict: Dict[str, Tensor], prefix: str, default: int) -> int:
-    for key, tensor in state_dict.items():
-        if key.startswith(prefix) and key.endswith("relative_position_bias_table"):
-            return (math.isqrt(tensor.size(0)) + 1) // 2
-    return default
-
-
-def _infer_head_dim(
-    state_dict: Dict[str, Tensor],
-    prefix: str,
-    hidden_channels: int,
-    default: int,
-) -> int:
-    for key, tensor in state_dict.items():
-        if key.startswith(prefix) and key.endswith("relative_position_bias_table"):
-            return hidden_channels // tensor.size(1)
-    return default
-
-
-def _infer_attention_dim(
-    state_dict: Dict[str, Tensor],
-    prefix: str,
-    default: int,
-) -> int:
-    key = f"{prefix}.in_conv.weight"
-    if key in state_dict:
-        return state_dict[key].size(0)
-    return default
 
 
 def _infer_context_depths(
@@ -301,32 +277,27 @@ class MambaIC(CompressionModel):
         num_slices = infer_num_slices(state_dict) or 5
         max_support_slices = infer_max_support_slices(state_dict, M, num_slices)
         slice_channels = M // num_slices
-        window_size = _infer_window_size(
+        window_size = infer_swatten_window_size(
             state_dict,
             "latent_codec.mean_support_transforms.0.",
-            8,
         )
-        support_attention_dim = _infer_attention_dim(
+        support_attention_dim = infer_swatten_attention_dim(
             state_dict,
             "latent_codec.mean_support_transforms.0",
-            128,
         )
-        support_head_dim = _infer_head_dim(
+        support_head_dim = infer_swatten_head_dim(
             state_dict,
             "latent_codec.mean_support_transforms.0.",
             support_attention_dim,
-            16,
         )
-        context_attention_dim = _infer_attention_dim(
+        context_attention_dim = infer_swatten_attention_dim(
             state_dict,
             "latent_codec.context_mean_transforms.0",
-            128,
         )
-        context_head_dim = _infer_head_dim(
+        context_head_dim = infer_swatten_head_dim(
             state_dict,
             "latent_codec.context_mean_transforms.0.",
             context_attention_dim,
-            16,
         )
         net = cls(
             depths=depths,

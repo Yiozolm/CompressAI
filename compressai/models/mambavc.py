@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import math
-
 from typing import Dict, Sequence, Tuple
 
 import torch.nn as nn
@@ -13,52 +11,26 @@ from compressai.entropy_models.cca import (
     infer_cca_hidden_channels,
     infer_cca_num_layers,
 )
-from compressai.layers.attn import SWAtten
-from compressai.registry import register_model
-
-from .ssm_support import (
+from compressai.layers.attn import (
+    SWAtten,
+    infer_swatten_attention_dim,
+    infer_swatten_head_dim,
+    infer_swatten_window_size,
+)
+from compressai.layers.ssm import (
     build_vss_backbone,
     infer_vss_block_kwargs,
     infer_vss_depths,
-    slice_support_channels,
 )
-from .stf_support import (
+from compressai.models._bases import (
     SliceEntropyCompressionModel,
     infer_max_support_slices,
     infer_num_slices,
+    slice_support_channels,
 )
+from compressai.registry import register_model
 
 __all__ = ["MambaVC"]
-
-
-def _infer_window_size(state_dict: Dict[str, Tensor], prefix: str, default: int) -> int:
-    for key, tensor in state_dict.items():
-        if key.startswith(prefix) and key.endswith("relative_position_bias_table"):
-            return (math.isqrt(tensor.size(0)) + 1) // 2
-    return default
-
-
-def _infer_head_dim(
-    state_dict: Dict[str, Tensor],
-    prefix: str,
-    hidden_channels: int,
-    default: int,
-) -> int:
-    for key, tensor in state_dict.items():
-        if key.startswith(prefix) and key.endswith("relative_position_bias_table"):
-            return hidden_channels // tensor.size(1)
-    return default
-
-
-def _infer_attention_dim(
-    state_dict: Dict[str, Tensor],
-    prefix: str,
-    default: int,
-) -> int:
-    key = f"{prefix}.in_conv.weight"
-    if key in state_dict:
-        return state_dict[key].size(0)
-    return default
 
 
 @register_model("mambavc")
@@ -190,21 +162,18 @@ class MambaVC(SliceEntropyCompressionModel):
         hyper_channels = state_dict["entropy_bottleneck.quantiles"].size(0)
         num_slices = infer_num_slices(state_dict) or 5
         max_support_slices = infer_max_support_slices(state_dict, M, num_slices)
-        window_size = _infer_window_size(
+        window_size = infer_swatten_window_size(
             state_dict,
             "latent_codec.mean_support_transforms.0.",
-            8,
         )
-        support_attention_dim = _infer_attention_dim(
+        support_attention_dim = infer_swatten_attention_dim(
             state_dict,
             "latent_codec.mean_support_transforms.0",
-            128,
         )
-        support_head_dim = _infer_head_dim(
+        support_head_dim = infer_swatten_head_dim(
             state_dict,
             "latent_codec.mean_support_transforms.0.",
             support_attention_dim,
-            16,
         )
         net = cls(
             depths=depths,

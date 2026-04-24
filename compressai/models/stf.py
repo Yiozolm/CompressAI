@@ -17,14 +17,13 @@ from compressai.entropy_models.cca import (
 )
 from compressai.layers.attn import PatchMerging, PatchSplit
 from compressai.layers.lic.stf import PatchEmbed, STFBasicLayer, STFWinNoShiftAttention
-from compressai.models.utils import conv, deconv
-from compressai.registry import register_model
-
-from .stf_support import (
+from compressai.models._bases import (
     SliceEntropyCompressionModel,
     infer_max_support_slices,
     infer_num_slices,
 )
+from compressai.models.utils import conv, deconv
+from compressai.registry import register_model
 
 __all__ = ["SymmetricalTransFormer", "WACNN"]
 

@@ -7,7 +7,6 @@ import torch.nn as nn
 
 from torch import Tensor
 
-from compressai.entropy_models import EntropyBottleneck, GaussianConditional
 from compressai.layers.lic.dcae import (
     MutiScaleDictionaryCrossAttentionGLU,
     ResScaleConvolutionGateBlock,
@@ -17,30 +16,18 @@ from compressai.layers.lic.dcae import (
     conv,
     deconv,
 )
-from compressai.registry import register_model
-
-from .dcae_support import (
+from compressai.models._bases import (
     DictionaryEntropyCompressionModel,
     infer_attention_head_dim,
     infer_dictionary_max_support_slices,
     infer_dictionary_num_slices,
     infer_stage_block_num,
     infer_window_size,
+    slice_support_channels,
 )
+from compressai.registry import register_model
 
 __all__ = ["DCAE"]
-
-
-def _support_count(index: int, max_support_slices: int) -> int:
-    if max_support_slices < 0:
-        return index
-    return min(index, max_support_slices)
-
-
-def _support_count_with_current(index: int, max_support_slices: int) -> int:
-    if max_support_slices < 0:
-        return index + 1
-    return min(index + 1, max_support_slices + 1)
 
 
 @register_model("dcae")
@@ -99,7 +86,9 @@ class DCAE(DictionaryEntropyCompressionModel):
         self.dt = nn.Parameter(torch.randn(dict_num, dictionary_dim), requires_grad=True)
         self.dt_cross_attention = nn.ModuleList(
             MutiScaleDictionaryCrossAttentionGLU(
-                input_dim=M * 2 + slice_channels * _support_count(index, max_support_slices),
+                input_dim=slice_support_channels(
+                    M * 2, slice_channels, index, max_support_slices
+                ),
                 output_dim=M,
                 head_num=dict_head_num,
                 mlp_rate=4,
@@ -244,39 +233,12 @@ class DCAE(DictionaryEntropyCompressionModel):
             *self.hs_up2,
         )
 
-        self.cc_mean_transforms = nn.ModuleList(
-            nn.Sequential(
-                conv(M * 3 + slice_channels * _support_count(index, max_support_slices), 224, stride=1, kernel_size=3),
-                nn.GELU(),
-                conv(224, 128, stride=1, kernel_size=3),
-                nn.GELU(),
-                conv(128, slice_channels, stride=1, kernel_size=3),
-            )
-            for index in range(num_slices)
+        self._init_dictionary_entropy(
+            M=M,
+            num_slices=num_slices,
+            max_support_slices=max_support_slices,
+            hyper_channels=hyper_channels,
         )
-        self.cc_scale_transforms = nn.ModuleList(
-            nn.Sequential(
-                conv(M * 3 + slice_channels * _support_count(index, max_support_slices), 224, stride=1, kernel_size=3),
-                nn.GELU(),
-                conv(224, 128, stride=1, kernel_size=3),
-                nn.GELU(),
-                conv(128, slice_channels, stride=1, kernel_size=3),
-            )
-            for index in range(num_slices)
-        )
-        self.lrp_transforms = nn.ModuleList(
-            nn.Sequential(
-                conv(M * 3 + slice_channels * _support_count_with_current(index, max_support_slices), 224, stride=1, kernel_size=3),
-                nn.GELU(),
-                conv(224, 128, stride=1, kernel_size=3),
-                nn.GELU(),
-                conv(128, slice_channels, stride=1, kernel_size=3),
-            )
-            for index in range(num_slices)
-        )
-
-        self.entropy_bottleneck = EntropyBottleneck(hyper_channels)
-        self.gaussian_conditional = GaussianConditional(None)
 
     def forward(self, x: Tensor) -> Dict[str, Union[Dict[str, Tensor], Tensor]]:
         latent = self.g_a(x)

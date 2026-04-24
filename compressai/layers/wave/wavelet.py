@@ -14,7 +14,12 @@ except ModuleNotFoundError as error:
 else:
     _PYTORCH_WAVELETS_IMPORT_ERROR = None
 
-from ..lic.blocks import OLP
+# OLP is imported lazily to avoid the wave -> lic -> cmic -> wave cycle that
+# arises now that ``compressai/layers/lic/cmic.py`` consumes WLS / iWLS.
+def _OLP(*args, **kwargs):
+    from ..lic.blocks import OLP  # local import breaks cycle
+
+    return OLP(*args, **kwargs)
 
 __all__ = [
     "DWT2D",
@@ -91,7 +96,7 @@ class WLS(nn.Module):
     def __init__(self, in_dim: int, out_dim: int, wave: str = "haar") -> None:
         super().__init__()
         self.dwt = DWT2D(wave=wave)
-        self.olp = OLP(in_dim * 4, out_dim)
+        self.olp = _OLP(in_dim * 4, out_dim)
         self.scaling_factors = nn.Parameter(_make_scaling_factors(in_dim))
 
     def forward(self, input_tensor: Tensor) -> Tensor:
@@ -110,7 +115,7 @@ class iWLS(nn.Module):
     def __init__(self, in_dim: int, out_dim: int, wave: str = "haar") -> None:
         super().__init__()
         self.idwt = IDWT2D(wave=wave)
-        self.olp = OLP(in_dim, out_dim * 4)
+        self.olp = _OLP(in_dim, out_dim * 4)
         self.scaling_factors = nn.Parameter(_make_scaling_factors(out_dim))
 
     def forward(self, input_tensor: Tensor) -> Tensor:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from typing import Any, Callable, Dict, Sequence, Tuple, TypeVar
 
 import torch.nn as nn
@@ -9,24 +11,64 @@ from torch import Tensor
 from compressai.entropy_models import EntropyBottleneck, GaussianConditional
 from compressai.latent_codecs import WeChARMLatentCodec
 from compressai.layers.attn import SWAtten
-from compressai.layers.wave import is_pytorch_wavelets_available
-from compressai.registry import register_model
-
-from .base import CompressionModel
-from .weconvene_support import (
+from compressai.layers.wave import (
     WeConveneAnalysisTransform,
     WeConveneHyperAnalysisTransform,
     WeConveneHyperSynthesisTransform,
     WeConveneSynthesisTransform,
-    infer_max_support_slices,
-    infer_num_slices,
-    infer_support_attention,
-    lrp_channels,
-    make_entropy_transform,
-    support_channels,
+    is_pytorch_wavelets_available,
 )
+from compressai.models._bases import (
+    lrp_support_channels as lrp_channels,
+    make_entropy_transform,
+    slice_support_channels as support_channels,
+)
+from compressai.registry import register_model
+
+from .base import CompressionModel
 
 __all__ = ["WeConvene"]
+
+
+def _infer_num_slices(state_dict: Dict[str, Tensor]) -> int:
+    indices = {
+        int(key.split(".")[2])
+        for key in state_dict
+        if key.startswith("latent_codec.cc_mean_transforms_low.") and key.endswith(".0.weight")
+    }
+    if not indices:
+        raise KeyError("Unable to infer num_slices from state_dict")
+    return max(indices) + 1
+
+
+def _infer_max_support_slices(
+    state_dict: Dict[str, Tensor],
+    M: int,
+    num_slices: int,
+) -> int:
+    slice_channels = M // num_slices
+    last_index = num_slices - 1
+    key = f"latent_codec.mean_support_transforms_low.{last_index}.in_conv.weight"
+    if key not in state_dict:
+        return last_index
+    input_channels = state_dict[key].size(1)
+    return max(0, (input_channels - M) // slice_channels)
+
+
+def _infer_support_attention(state_dict: Dict[str, Tensor]) -> Tuple[int, int, int]:
+    in_conv_key = "latent_codec.mean_support_transforms_low.0.in_conv.weight"
+    table_key = (
+        "latent_codec.mean_support_transforms_low.0."
+        "non_local_block.block_1.msa.attn.relative_position_bias_table"
+    )
+    if in_conv_key not in state_dict or table_key not in state_dict:
+        return 8, 16, 128
+
+    hidden_dim = state_dict[in_conv_key].size(0)
+    table_size, num_heads = state_dict[table_key].shape
+    window_size = (math.isqrt(table_size) + 1) // 2
+    head_dim = hidden_dim // num_heads
+    return window_size, head_dim, hidden_dim
 
 _ModelType = TypeVar("_ModelType", bound=type[nn.Module])
 
@@ -312,11 +354,11 @@ class WeConvene(CompressionModel):
     @classmethod
     def from_state_dict(cls, state_dict: Dict[str, Tensor]) -> "WeConvene":
         N = state_dict["g_a.input_block.conv1.weight"].size(0)
-        num_slices = infer_num_slices(state_dict)
+        num_slices = _infer_num_slices(state_dict)
         M = state_dict["latent_codec.cc_mean_transforms_low.0.4.weight"].size(0) * num_slices
         hyper_channels = state_dict["entropy_bottleneck.quantiles"].size(0)
-        max_support_slices = infer_max_support_slices(state_dict, M, num_slices)
-        support_window_size, support_head_dim, support_attention_dim = infer_support_attention(
+        max_support_slices = _infer_max_support_slices(state_dict, M, num_slices)
+        support_window_size, support_head_dim, support_attention_dim = _infer_support_attention(
             state_dict
         )
 
