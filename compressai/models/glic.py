@@ -322,7 +322,9 @@ class GLIC(SimpleVAECompressionModel):
         )
 
     def ortho_loss(self) -> Tensor:
-        loss = sum(module.loss() for module in self.modules() if isinstance(module, OLP))
+        loss = sum(
+            module.loss() for module in self.modules() if isinstance(module, OLP)
+        )
         return cast(Tensor, loss)
 
     def energy(self, input_tensor: Tensor) -> Tuple[Tensor, ...]:
