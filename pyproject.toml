@@ -37,6 +37,7 @@ dependencies = [
   "pybind11>=2.6.0; python_version < '3.10'", # For --no-build-isolation.
   "pybind11>=2.12.0; python_version >= '3.10'", # For --no-build-isolation.
   "pytorch-msssim",
+  "requests",
   "scipy",
   "setuptools>=68", # For --no-build-isolation.
   "timm",
@@ -69,9 +70,8 @@ dev = [
   "ruff==0.8.6",
 ]
 doc = [
-  "Jinja2<3.1",
-  "sphinx==4.3.0",
-  "sphinx-book-theme==1.0.1",
+  "sphinx>=7.4,<9; python_version >= '3.9'",
+  "sphinx-book-theme>=1.1; python_version >= '3.9'",
 ]
 tutorials = [
   "ipywidgets",
@@ -89,7 +89,7 @@ lic = [
   "pytorch-wavelets",
 ]
 mamba = [
-  "mamba-ssm",
+  "mamba-ssm; platform_system == 'Linux'",
   "triton; platform_system == 'Linux'",
 ]
 ftic = [
@@ -115,9 +115,8 @@ dev = [
   { include-group = "test" },
 ]
 doc = [
-  "Jinja2<3.1",
-  "sphinx==4.3.0",
-  "sphinx-book-theme==1.0.1",
+  "sphinx>=7.4,<9; python_version >= '3.9'",
+  "sphinx-book-theme>=1.1; python_version >= '3.9'",
 ]
 tutorials = [
   "ipywidgets",
@@ -134,7 +133,7 @@ lic = [
   "pytorch-wavelets",
 ]
 mamba = [
-  "mamba-ssm",
+  "mamba-ssm; platform_system == 'Linux'",
   "triton; platform_system == 'Linux'",
 ]
 ftic = [
@@ -147,6 +146,55 @@ zip-safe = false
 
 [tool.setuptools.packages.find]
 exclude = ["tests"]
+
+[tool.uv]
+# Optional extras (mamba, pointcloud) bundle packages that need `torch` at
+# build time but don't declare it in their build-system. Install torch first,
+# then build them against the active environment.
+no-build-isolation-package = [
+  "mamba-ssm",
+  "pointops-yoda",
+  "torch-geometric",
+]
+# Some transitive deps pin scipy < 1.14, which has no Python 3.13 wheels and
+# requires a Fortran compiler to build from source. Force a recent scipy on
+# 3.13 so resolution doesn't fall back to source builds.
+override-dependencies = [
+  "scipy>=1.14.0; python_version >= '3.13'",
+  "numpy>=1.26.0; python_version >= '3.13'",
+]
+
+# Some Linux/CUDA-only packages (mamba-ssm) cannot have their metadata built
+# on macOS. Provide it inline so the resolver doesn't attempt a build.
+[[tool.uv.dependency-metadata]]
+name = "mamba-ssm"
+version = "2.2.2"
+requires-dist = ["torch", "triton; platform_system == 'Linux'"]
+requires-python = ">=3.8"
+
+[[tool.uv.dependency-metadata]]
+name = "pointops-yoda"
+version = "1.0.0"
+requires-dist = ["torch"]
+requires-python = ">=3.8"
+
+[tool.uv.extra-build-dependencies]
+mamba-ssm = [
+  "torch",
+  "packaging",
+  "wheel",
+  "setuptools",
+]
+pointops-yoda = [
+  "torch",
+  "wheel",
+  "setuptools",
+]
+torch-geometric = [
+  "torch",
+  "wheel",
+  "setuptools",
+]
 
 [tool.black]
 line-length = 88
