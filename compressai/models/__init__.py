@@ -34,6 +34,8 @@ from .ftic import *
 from .glic import *
 from .google import *
 from .invcompress import *
+from .mambaic import *
+from .mambavc import *
 from .mlicpp import *
 from .pointcloud import *
 from .saaf import *

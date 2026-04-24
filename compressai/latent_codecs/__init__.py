@@ -36,6 +36,7 @@ from .gain import GainHyperLatentCodec, GainHyperpriorLatentCodec
 from .gaussian_conditional import GaussianConditionalLatentCodec
 from .hyper import HyperLatentCodec
 from .hyperprior import HyperpriorLatentCodec
+from .mambaic import MambaICLatentCodec
 from .mlicpp import MLICPlusPlusLatentCodec
 from .rasterscan import RasterScanLatentCodec
 from .weconvene import WeChARMLatentCodec
@@ -51,6 +52,7 @@ __all__ = [
     "GaussianConditionalLatentCodec",
     "HyperLatentCodec",
     "HyperpriorLatentCodec",
+    "MambaICLatentCodec",
     "MLICPlusPlusLatentCodec",
     "RasterScanLatentCodec",
     "WeChARMLatentCodec",

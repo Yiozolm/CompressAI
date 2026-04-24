@@ -52,6 +52,22 @@ def _partition_drop_paths(
     return partitions
 
 
+def _normalize_vss_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    aliases = {
+        "ssm_d_state": "d_state",
+        "ssm_conv": "d_conv",
+        "ssm_act_layer": "act_layer",
+        "ssm_conv_bias": "conv_bias",
+        "ssm_drop_rate": "dropout",
+        "ssm_init": "initialize",
+    }
+    normalized = dict(kwargs)
+    for source, target in aliases.items():
+        if source in normalized and target not in normalized:
+            normalized[target] = normalized.pop(source)
+    return normalized
+
+
 def _make_vss_stage(
     depth: int,
     hidden_dim: int,
@@ -124,7 +140,7 @@ def build_vss_backbone(
     drop_paths = torch.linspace(0, drop_path_rate, sum(depths)).tolist()
     encoder_drops = _partition_drop_paths(drop_paths, depths)
     decoder_drops = _partition_drop_paths(drop_paths, list(reversed(depths)))
-    vss_kwargs = dict(vss_kwargs)
+    vss_kwargs = _normalize_vss_kwargs(dict(vss_kwargs))
 
     g_a = nn.Sequential(
         conv(3, 2 * N, kernel_size=5, stride=2),
@@ -220,7 +236,7 @@ def build_vss_context_stage(
             in_channels,
             drop_paths,
             conv(in_channels, out_channels, kernel_size=3, stride=1),
-            vss_kwargs=dict(vss_kwargs),
+            vss_kwargs=_normalize_vss_kwargs(dict(vss_kwargs)),
         )
     )
 
