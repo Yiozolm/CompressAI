@@ -68,6 +68,19 @@ def _default_groups(M: int) -> List[int]:
 
 @_maybe_register_model("cmic")
 class CMIC(SimpleVAECompressionModel):
+    r"""Content-Aware Mamba Image Compression model from Y. Chen, Z. Hu,
+    et al.: `"Content-Aware Mamba for Learned Image Compression"
+    <https://openreview.net/forum?id=WwDNiisZQm>`_, Int. Conf. on Learning
+    Representations (ICLR), 2026.
+
+    Combines wavelet/graph auxiliary branches with content-adaptive Mamba
+    state-space blocks and a checkerboard / channel-group hyperprior.
+
+    Args:
+        N (int): Number of channels in the hyperprior.
+        M (int): Number of channels in the latent representation.
+    """
+
     def __init__(
         self,
         N: int = 192,

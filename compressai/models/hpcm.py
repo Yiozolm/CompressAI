@@ -162,7 +162,27 @@ class _SpatialPrior(nn.Module):
 # ----------------------------------------------------------------------------
 @register_model("hpcm")
 class HPCM(CompressionModel):
-    """Unified HPCM model covering Base / Large / PhiContext variants."""
+    r"""HPCM model from J. Lyu et al.: `"Learned Image Compression with
+    Hierarchical Progressive Context Modeling"
+    <https://arxiv.org/abs/2507.19125>`_, IEEE/CVF Int. Conf. on Computer
+    Vision (ICCV), 2025.
+
+    Unified implementation covering the published Base / Large / PhiContext
+    variants. The 3-stage hierarchical progressive entropy modelling is
+    delegated to
+    :class:`compressai.latent_codecs.HierarchicalProgressiveLatentCodec`, and
+    the hyperprior uses
+    :class:`compressai.entropy_models.GeneralizedGaussianConditional`
+    (``β=1.5``).
+
+    Args:
+        N (int): Number of channels in the hyperprior.
+        M (int): Number of channels in the latent representation.
+        g_a_depth (int): Depth of the inner stage of the analysis transform.
+        g_s_depth (int): Depth of the inner stage of the synthesis transform.
+        y_prior_depth (int): Depth of the y-prior network.
+        use_attention (bool): Enable windowed cross-attention blocks.
+    """
 
     def __init__(
         self,

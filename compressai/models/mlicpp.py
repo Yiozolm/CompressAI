@@ -33,6 +33,23 @@ _LEGACY_LATENT_PREFIXES = (
 
 @register_model("mlicpp")
 class MLICPlusPlus(CompressionModel):
+    r"""MLIC++ model from W. Jiang, J. Yang, Y. Zhai, F. Gao, R. Wang:
+    `"MLIC++: Linear Complexity Multi-Reference Entropy Modeling for Learned
+    Image Compression" <https://arxiv.org/abs/2307.15421>`_, ACM Trans.
+    Multimedia Comput. Commun. Appl. (TOMM), 2025; ICML 2023 Neural
+    Compression Workshop.
+
+    Builds a multi-reference entropy model with linear-complexity local,
+    channel, and global intra/inter context modules on top of a Minnen2018
+    style hyperprior.
+
+    Args:
+        N (int): Number of channels in the hyperprior.
+        M (int): Number of channels in the latent representation.
+        slice_num (int): Number of channel slices for the entropy model.
+        context_window (int): Spatial context window size (odd).
+    """
+
     def __init__(
         self,
         N: int = 192,

@@ -32,6 +32,19 @@ __all__ = ["DCAE"]
 
 @register_model("dcae")
 class DCAE(DictionaryEntropyCompressionModel):
+    r"""DCAE model from J. Lu, L. Zhang, X. Zhou, M. Li, W. Li, S. Gu:
+    `"Learned Image Compression with Dictionary-based Entropy Model"
+    <https://arxiv.org/abs/2504.00496>`_, IEEE/CVF Conf. on Computer Vision
+    and Pattern Recognition (CVPR), 2025.
+
+    Couples Swin/conv multi-scale transforms with a learned dictionary that
+    feeds a dictionary-based channel-wise autoregressive entropy model.
+
+    Args:
+        N (int): Number of channels in the hyperprior.
+        M (int): Number of channels in the latent representation.
+    """
+
     def __init__(
         self,
         head_dim: Optional[Sequence[int]] = None,

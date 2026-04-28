@@ -187,6 +187,27 @@ def _make_mixed_stage(
 @register_model("lic-tcm")
 @register_model("tcm")
 class TCM(CompressionModel):
+    r"""TCM model from J. Liu, H. Sun, J. Katto: `"Learned Image Compression
+    with Mixed Transformer-CNN Architectures"
+    <https://arxiv.org/abs/2303.14978>`_, IEEE/CVF Conf. on Computer Vision
+    and Pattern Recognition (CVPR), 2023 (Highlight).
+
+    Stacks parallel Transformer-CNN Mixture (TCM) blocks for the
+    analysis/synthesis transforms and uses a channel-wise autoregressive
+    entropy model with parameter-efficient swin-transformer attention
+    (``SWAtten``).
+
+    Optionally enables AuxT disentangled training auxiliary transforms
+    (``use_auxt=True``, see Li et al., ICLR 2025) and the Causal Context
+    Adjustment loss entropy model (``use_cca=True``, see Han et al.,
+    NeurIPS 2024).
+
+    Args:
+        N (int): Number of channels in the hyperprior backbone.
+        M (int): Number of channels in the latent representation.
+        num_slices (int): Number of channel slices for the entropy model.
+    """
+
     def __init__(
         self,
         config: Optional[Sequence[int]] = None,

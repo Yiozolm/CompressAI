@@ -85,6 +85,20 @@ def _split_drop_paths(
 
 @register_model("ftic")
 class FrequencyAwareTransFormer(CompressionModel):
+    r"""Frequency-aware Transformer model from H. Li, S. Li, W. Dai, C. Li,
+    J. Zou, H. Xiong: `"Frequency-Aware Transformer for Learned Image
+    Compression" <https://openreview.net/forum?id=HKGQDDTuvZ>`_, Int. Conf. on
+    Learning Representations (ICLR), 2024.
+
+    Uses frequency-decomposition window attention (FDWA) and frequency
+    modulation FFNs together with a transformer-based channel-wise
+    autoregressive entropy model (T-CA).
+
+    Args:
+        M (int): Number of channels in the latent representation.
+        num_slices (int): Number of channel slices for the T-CA entropy model.
+    """
+
     def __init__(
         self,
         config: Sequence[int] = (2, 2, 2, 2, 2, 2),

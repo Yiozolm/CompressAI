@@ -30,6 +30,21 @@ __all__ = ["SymmetricalTransFormer", "WACNN"]
 
 @register_model("stf-wacnn")
 class WACNN(SliceEntropyCompressionModel):
+    r"""WACNN model from R. Zou, C. Song, Z. Zhang: `"The Devil Is in the
+    Details: Window-based Attention for Image Compression"
+    <https://arxiv.org/abs/2203.08450>`_, IEEE/CVF Conf. on Computer Vision
+    and Pattern Recognition (CVPR), 2022.
+
+    CNN-based variant that inserts window-based attention modules
+    (``STFWinNoShiftAttention``) inside the analysis/synthesis transforms,
+    paired with a Minnen2020-style channel-wise autoregressive entropy model.
+
+    Args:
+        N (int): Number of channels in the hyperprior backbone.
+        M (int): Number of channels in the latent representation.
+        num_slices (int): Number of channel slices for the entropy model.
+    """
+
     def __init__(
         self,
         N: int = 192,
@@ -145,6 +160,20 @@ class WACNN(SliceEntropyCompressionModel):
 
 @register_model("stf")
 class SymmetricalTransFormer(SliceEntropyCompressionModel):
+    r"""Symmetrical Transformer model (STF) from R. Zou, C. Song, Z. Zhang:
+    `"The Devil Is in the Details: Window-based Attention for Image
+    Compression" <https://arxiv.org/abs/2203.08450>`_, IEEE/CVF Conf. on
+    Computer Vision and Pattern Recognition (CVPR), 2022.
+
+    Transformer-based companion of :class:`WACNN` that builds the
+    analysis/synthesis transforms with stacked Swin-style basic layers and a
+    channel-wise autoregressive entropy model.
+
+    Args:
+        embed_dim (int): Patch-embedding dimension.
+        num_slices (int): Number of channel slices for the entropy model.
+    """
+
     def __init__(
         self,
         pretrain_img_size: int = 256,

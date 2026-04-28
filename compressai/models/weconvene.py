@@ -94,6 +94,25 @@ def _require_wavelets() -> None:
 
 @_maybe_register_model("weconvene")
 class WeConvene(CompressionModel):
+    r"""WeConvene model from H. Fu, J. Liang, Z. Fang, J. Han, F. Liang,
+    G. Zhang: `"WeConvene: Learned Image Compression with Wavelet-Domain
+    Convolution and Entropy Model"
+    <https://arxiv.org/abs/2407.09983>`_, European Conf. on Computer Vision
+    (ECCV), 2024.
+
+    Inserts wavelet-domain convolution (WeConv) modules in the
+    analysis/synthesis transforms and performs entropy coding in the wavelet
+    domain via a wavelet-domain channel-wise autoregressive entropy model
+    (WeChARM) that codes low-frequency coefficients first and then uses them
+    as priors for the high-frequency coefficients.
+
+    Args:
+        N (int): Number of channels in the hyperprior.
+        M (int): Number of channels in the latent representation.
+        wavelet (str): Wavelet basis used by the WeConv / WeChARM modules.
+        num_slices (int): Number of channel slices for the entropy model.
+    """
+
     def __init__(
         self,
         N: int = 128,

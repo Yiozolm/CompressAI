@@ -218,7 +218,19 @@ class GLICSynthesisTransform(nn.Module):
 
 @register_model("glic")
 class GLIC(SimpleVAECompressionModel):
-    """Graph-based learned image compression with auxiliary transforms."""
+    r"""GLIC model from Y. Chen, Z. Hu, et al.: `"Adaptive Learned Image
+    Compression with Graph Neural Networks"
+    <https://arxiv.org/abs/2603.25316>`_, IEEE/CVF Conf. on Computer Vision
+    and Pattern Recognition (CVPR), 2026.
+
+    Adds graph-feature aggregation (GFA) branches with content-adaptive
+    connectivity to wavelet/CNN auxiliary transforms, paired with a
+    channel-group + checkerboard hyperprior latent codec.
+
+    Args:
+        N (int): Number of channels in the hyperprior.
+        M (int): Number of channels in the latent representation.
+    """
 
     def __init__(
         self,

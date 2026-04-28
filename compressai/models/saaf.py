@@ -39,6 +39,19 @@ __all__ = ["SAAF"]
 
 @register_model("saaf")
 class SAAF(DictionaryEntropyCompressionModel):
+    r"""SAAF model from H. Ma, X. Shi, H. Sun, X. Yue, X. Liu, G. Wang, W. Cai:
+    "Learned Image Compression via Sparse Attention and Adaptive Frequency",
+    IEEE/CVF Conf. on Computer Vision and Pattern Recognition (CVPR), 2026.
+
+    Extends the dictionary-based entropy framework of :class:`DCAE` with
+    sparse spatial attention and adaptive frequency-domain blocks for the
+    nonlinear transforms.
+
+    Args:
+        N (int): Number of channels in the hyperprior.
+        M (int): Number of channels in the latent representation.
+    """
+
     def __init__(
         self,
         head_dim: Optional[Sequence[int]] = None,

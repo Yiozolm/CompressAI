@@ -248,6 +248,19 @@ class _InvertibleCompressionTransform(nn.Module):
 
 @_maybe_register_model("invcompress")
 class InvCompress(Cheng2020Anchor):
+    r"""InvCompress model from Y. Xie, K.L. Cheng, Q. Chen: `"Enhanced
+    Invertible Encoding for Learned Image Compression"
+    <https://arxiv.org/abs/2108.03690>`_, ACM Int. Conf. on Multimedia
+    (ACMMM), 2021.
+
+    Replaces the autoencoder transform of :class:`Cheng2020Anchor` with an
+    invertible neural network plus an attentive channel-squeeze layer and a
+    feature enhancement module to mitigate information loss.
+
+    Args:
+        N (int): Number of channels in the latent representation.
+    """
+
     def __init__(self, N: int = 192, **kwargs: Any) -> None:
         _require_freia()
         super().__init__(N=N, **kwargs)

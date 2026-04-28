@@ -35,6 +35,22 @@ __all__ = ["MambaVC"]
 
 @register_model("mambavc")
 class MambaVC(SliceEntropyCompressionModel):
+    r"""MambaVC model from S. Qin, J. Wang, Y. Zhou, B. Chen, T. Luo, B. An,
+    T. Dai, S. Xia, Y. Wang: `"MambaVC: Learned Visual Compression with
+    Selective State Spaces" <https://arxiv.org/abs/2405.15413>`_,
+    arXiv:2405.15413, 2024.
+
+    Replaces the nonlinear activation after each downsampling stage with a
+    visual state-space (VSS) block built on a 2D selective scanning (2DSS)
+    module, paired with a Minnen2020-style channel-wise autoregressive
+    entropy model.
+
+    Args:
+        N (int): Number of channels in the hyperprior backbone.
+        M (int): Number of channels in the latent representation.
+        num_slices (int): Number of channel slices for the entropy model.
+    """
+
     def __init__(
         self,
         depths: Sequence[int] = (2, 2, 9, 2),

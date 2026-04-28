@@ -51,6 +51,21 @@ def _infer_context_depths(
 
 @register_model("mambaic")
 class MambaIC(CompressionModel):
+    r"""MambaIC model from F. Zeng, H. Tang, Y. Shao, S. Chen, L. Shao, Y. Wang:
+    `"MambaIC: State Space Models for High-Performance Learned Image
+    Compression" <https://arxiv.org/abs/2503.12461>`_, IEEE/CVF Conf. on
+    Computer Vision and Pattern Recognition (CVPR), 2025.
+
+    Builds analysis/synthesis transforms with VSS (visual state-space) blocks
+    and combines a window-based local attention spatial context with a
+    channel-wise autoregressive entropy model.
+
+    Args:
+        N (int): Number of channels in the hyperprior backbone.
+        M (int): Number of channels in the latent representation.
+        num_slices (int): Number of channel slices for the entropy model.
+    """
+
     def __init__(
         self,
         depths: Sequence[int] = (2, 2, 9, 2),
