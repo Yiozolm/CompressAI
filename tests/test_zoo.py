@@ -37,6 +37,7 @@ from compressai.models import (
     DCAE,
     FactorizedPrior,
     FrequencyAwareTransFormer,
+    HPCM,
     InvCompress,
     JointAutoregressiveHierarchicalPriors,
     MambaIC,
@@ -58,6 +59,10 @@ from compressai.zoo import (
     cmic,
     dcae,
     ftic,
+    hpcm,
+    hpcm_base,
+    hpcm_large,
+    hpcm_phi,
     invcompress,
     mambaic,
     mambavc,
@@ -322,6 +327,40 @@ class TestCandidateModels:
 
         with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
             mambavc(pretrained=True)
+
+    def test_hpcm(self):
+        common_kwargs = dict(
+            N=32,
+            M=32,
+            g_a_depth=1,
+            g_s_depth=1,
+            y_prior_depth=1,
+            attn_window_s1=2,
+            attn_window_s2=4,
+            attn_window_s3=8,
+            attn_num_heads=4,
+        )
+        for factory, expect_attention in (
+            (hpcm, True),
+            (hpcm_base, True),
+            (hpcm_phi, False),
+        ):
+            kwargs = dict(common_kwargs)
+            if not expect_attention:
+                # PhiContext factory ignores attn_window_* kwargs because
+                # use_attention=False; pass only the shape kwargs.
+                for key in ("attn_window_s1", "attn_window_s2", "attn_window_s3", "attn_num_heads"):
+                    kwargs.pop(key)
+            net = factory(**kwargs)
+            assert isinstance(net, HPCM)
+            assert net.use_attention is expect_attention
+            with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+                factory(pretrained=True)
+
+        assert candidate_model_architectures["hpcm"] is HPCM
+        assert candidate_model_architectures["hpcm-base"] is HPCM
+        assert candidate_model_architectures["hpcm-large"] is HPCM
+        assert candidate_model_architectures["hpcm-phi"] is HPCM
 
 
 class TestBmshj2018Factorized:

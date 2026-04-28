@@ -35,6 +35,7 @@ from compressai.layers import is_freia_available, is_pytorch_wavelets_available
 from compressai.entropy_models import EntropyBottleneck
 from compressai.latent_codecs import (
     ChannelSliceLatentCodec,
+    HierarchicalProgressiveLatentCodec,
     MLICPlusPlusLatentCodec,
     WeChARMLatentCodec,
 )
@@ -42,6 +43,7 @@ from compressai.models import (
     CMIC,
     DCAE,
     FrequencyAwareTransFormer,
+    HPCM,
     InvCompress,
     MambaIC,
     MambaVC,
@@ -903,6 +905,73 @@ class TestModels:
         assert len(compressed["strings"][0]) == x.size(0)
         assert len(compressed["strings"][1]) == x.size(0)
         assert decoded["x_hat"].shape == x.shape
+
+    def test_hpcm_base(self):
+        model = HPCM(
+            N=32,
+            M=32,
+            g_a_depth=1,
+            g_s_depth=1,
+            y_prior_depth=1,
+            use_attention=True,
+            attn_window_s1=2,
+            attn_window_s2=4,
+            attn_window_s3=8,
+            attn_num_heads=4,
+        )
+        model.eval()
+        x = torch.rand(1, 3, 128, 128)
+
+        assert isinstance(model.latent_codec, HierarchicalProgressiveLatentCodec)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 32, 8, 8)
+        assert out["likelihoods"]["z"].shape == (1, 32, 2, 2)
+
+        loaded = HPCM.from_state_dict(
+            model.state_dict(),
+            attn_window_s1=2,
+            attn_window_s2=4,
+            attn_window_s3=8,
+            attn_num_heads=4,
+        )
+        assert loaded.N == 32
+        assert loaded.M == 32
+        assert loaded.g_a_depth == 1
+        assert loaded.g_s_depth == 1
+        assert loaded.y_prior_depth == 1
+        assert loaded.use_attention is True
+
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+
+    def test_hpcm_phi_no_attention(self):
+        model = HPCM(
+            N=32,
+            M=32,
+            g_a_depth=1,
+            g_s_depth=1,
+            y_prior_depth=1,
+            use_attention=False,
+        )
+        model.eval()
+        x = torch.rand(1, 3, 128, 128)
+
+        with torch.no_grad():
+            out = model(x)
+        assert out["x_hat"].shape == x.shape
+        assert "y" in out["likelihoods"]
+        assert "z" in out["likelihoods"]
+
+        loaded = HPCM.from_state_dict(model.state_dict())
+        assert loaded.use_attention is False
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
 
 
 def test_scale_table_default():

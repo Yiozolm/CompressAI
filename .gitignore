@@ -142,3 +142,7 @@ dmypy.json
 
 # PyCharm
 .idea/
+
+# migrate relative
+candidate/
+plan/

@@ -353,11 +353,11 @@ def glic(pretrained: bool = False, progress: bool = True, **kwargs):
 
 def _hpcm_default_kwargs(variant: str) -> dict:
     if variant == "base":
-        return dict(g_a_depth=2, g_s_depth=2, y_prior_depth=2, use_attention=True)
+        return dict(g_a_depth=4, g_s_depth=4, y_prior_depth=2, use_attention=True)
     if variant == "large":
-        return dict(g_a_depth=6, g_s_depth=6, y_prior_depth=3, use_attention=True)
+        return dict(g_a_depth=8, g_s_depth=8, y_prior_depth=3, use_attention=True)
     if variant == "phi":
-        return dict(g_a_depth=2, g_s_depth=2, y_prior_depth=2, use_attention=False)
+        return dict(g_a_depth=4, g_s_depth=4, y_prior_depth=2, use_attention=False)
     raise ValueError(f"Unknown HPCM variant: {variant}")
 
 

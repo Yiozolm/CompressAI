@@ -23,7 +23,7 @@ hyperprior uses :class:`compressai.entropy_models.GeneralizedGaussianConditional
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -38,7 +38,7 @@ from compressai.registry import register_model
 
 from .base import CompressionModel
 
-__all__ = ["HPCM"]
+__all__ = ["HPCM", "convert_upstream_state_dict"]
 
 
 # ----------------------------------------------------------------------------
@@ -267,6 +267,12 @@ class HPCM(CompressionModel):
     ) -> "HPCM":
         """Reconstruct an HPCM model from a state dict (any variant).
 
+        Accepts either the compressai layout (keys under ``g_a.*`` /
+        ``latent_codec.*``) or the upstream LIC-HPCM layout (flat keys like
+        ``g_a.branch.*`` / ``y_spatial_prior_adaptor_list_s1.*`` /
+        ``entropy_estimation.*``). Upstream dicts are auto-detected and
+        translated via :func:`convert_upstream_state_dict` before loading.
+
         Structural fields that can be inferred from tensor shapes (``N``,
         ``M``, ``g_a_depth``, ``g_s_depth``, ``y_prior_depth``,
         ``use_attention``) are auto-detected. Window sizes / head counts of
@@ -274,6 +280,8 @@ class HPCM(CompressionModel):
         fall back to ``__init__`` defaults; pass them via ``overrides`` to
         match a non-default checkpoint.
         """
+        if _is_upstream_state_dict(state_dict):
+            state_dict = convert_upstream_state_dict(state_dict)
         # The first conv4x4_down weight is g_a.0.weight: (96, 3, 4, 4)
         # The last g_a entry conv2x2_down(384, M) is g_a[N_blocks-1].weight: (M, 384, 2, 2)
         # M:
@@ -331,5 +339,189 @@ class HPCM(CompressionModel):
             use_attention=use_attention,
             **overrides,
         )
-        net.load_state_dict(state_dict)
+        # The upstream PhiContext checkpoint omits `adaptive_params` (defaults
+        # to ones, equivalent to no scaling) and `attn_*` (no attention). Allow
+        # missing keys but reject any unexpected extras so genuine errors still
+        # surface.
+        missing, unexpected = net.load_state_dict(state_dict, strict=False)
+        unexpected = [
+            key
+            for key in unexpected
+            if not key.startswith("latent_codec.attn_")
+            and not key.startswith("latent_codec.adaptive_params")
+        ]
+        if unexpected:
+            raise RuntimeError(
+                f"Unexpected keys in HPCM state dict: {unexpected[:10]}"
+                + ("..." if len(unexpected) > 10 else "")
+            )
+        allowed_missing_prefixes = (
+            "latent_codec.adaptive_params",
+            "latent_codec.attn_s1",
+            "latent_codec.attn_s2",
+            "latent_codec.attn_s3",
+            # Initialised from __init__ defaults; upstream checkpoints don't ship it.
+            "latent_codec.gaussian_conditional.scale_bound",
+        )
+        unwelcome_missing = [
+            key
+            for key in missing
+            if not any(key.startswith(prefix) for prefix in allowed_missing_prefixes)
+        ]
+        if unwelcome_missing:
+            raise RuntimeError(
+                f"Missing keys in HPCM state dict: {unwelcome_missing[:10]}"
+                + ("..." if len(unwelcome_missing) > 10 else "")
+            )
         return net
+
+
+# ----------------------------------------------------------------------------
+# Upstream-checkpoint conversion
+# ----------------------------------------------------------------------------
+def _is_upstream_state_dict(state_dict: Dict[str, Tensor]) -> bool:
+    """Heuristic: upstream checkpoints carry the candidate-only key prefixes."""
+    sentinel_keys = (
+        "entropy_estimation.beta",
+        "y_spatial_prior_adaptor_list_s1.0.weight",
+        "y_spatial_prior_s1_s2.branch_1.0.branch.0.weight",
+    )
+    return any(key in state_dict for key in sentinel_keys)
+
+
+_UPSTREAM_TOPLEVEL_RENAMES = {
+    "means_hyper": "latent_codec.means_hyper",
+    "scales_hyper": "latent_codec.scales_hyper",
+    "scale_table": "latent_codec.gaussian_conditional.scale_table",
+    "quantized_cdf_y": "latent_codec.gaussian_conditional._quantized_cdf",
+    "cdf_length_y": "latent_codec.gaussian_conditional._cdf_length",
+    "offset_y": "latent_codec.gaussian_conditional._offset",
+    "entropy_estimation.beta": "latent_codec.gaussian_conditional.beta",
+    "entropy_estimation.scale_lower_bound.bound": (
+        "latent_codec.gaussian_conditional.lower_bound_scale.bound"
+    ),
+    "entropy_estimation.likelihood_lower_bound.bound": (
+        "latent_codec.gaussian_conditional.likelihood_lower_bound.bound"
+    ),
+}
+
+# Hyperprior-side CDFs and the upstream-only adaptive_params_list are dropped:
+#   - quantized_cdf_z / cdf_length_z / offset_z were used by the upstream rANS
+#     encoder for ``z``; compressai's GeneralizedGaussianConditional regenerates
+#     them on demand and the forward pass doesn't need them.
+#   - adaptive_params_list defaults to all-ones in our model, equivalent to the
+#     upstream variants that omit it (e.g. the published HPCM_Phi checkpoint).
+_UPSTREAM_DROP_KEYS = (
+    "quantized_cdf_z",
+    "cdf_length_z",
+    "offset_z",
+)
+
+
+def _strip_branch_prefix(key: str, root: str) -> Optional[str]:
+    """``g_a.branch.X`` → ``g_a.X`` for a fixed ``root`` like ``g_a``.
+
+    Returns ``None`` when the key does not start with ``f"{root}.branch."``.
+    """
+    prefix = f"{root}.branch."
+    if not key.startswith(prefix):
+        return None
+    return f"{root}." + key[len(prefix):]
+
+
+def convert_upstream_state_dict(state_dict: Dict[str, Tensor]) -> Dict[str, Tensor]:
+    """Translate a candidate ``LIC-HPCM`` state dict into compressai layout.
+
+    The upstream layout flattens everything onto the model root and wraps each
+    transform in a ``self.branch = nn.Sequential(...)`` attribute. compressai's
+    HPCM mirrors the same module structure but: (1) drops the ``branch.``
+    indirection on the four transforms, (2) houses the per-stage spatial
+    priors / context net / hyper buffers / GGM under ``latent_codec.*``, and
+    (3) renames ``entropy_estimation``'s lower-bound buffer to match
+    :class:`GaussianConditional`'s naming.
+    """
+    converted: Dict[str, Tensor] = {}
+    for key, value in state_dict.items():
+        if key in _UPSTREAM_DROP_KEYS:
+            continue
+        new_key = _UPSTREAM_TOPLEVEL_RENAMES.get(key)
+        if new_key is not None:
+            converted[new_key] = value
+            continue
+
+        for root in ("g_a", "g_s", "h_a", "h_s"):
+            stripped = _strip_branch_prefix(key, root)
+            if stripped is not None:
+                converted[stripped] = value
+                break
+        else:
+            # Latent-codec-side keys: prefix every remaining upstream key.
+            if key.startswith("y_spatial_prior_adaptor_list_s1"):
+                converted[
+                    key.replace(
+                        "y_spatial_prior_adaptor_list_s1",
+                        "latent_codec.adaptor_s1",
+                        1,
+                    )
+                ] = value
+            elif key.startswith("y_spatial_prior_adaptor_list_s2"):
+                converted[
+                    key.replace(
+                        "y_spatial_prior_adaptor_list_s2",
+                        "latent_codec.adaptor_s2",
+                        1,
+                    )
+                ] = value
+            elif key.startswith("y_spatial_prior_adaptor_list_s3"):
+                converted[
+                    key.replace(
+                        "y_spatial_prior_adaptor_list_s3",
+                        "latent_codec.adaptor_s3",
+                        1,
+                    )
+                ] = value
+            elif key.startswith("y_spatial_prior_s1_s2"):
+                converted[
+                    key.replace(
+                        "y_spatial_prior_s1_s2",
+                        "latent_codec.spatial_prior_s1_s2",
+                        1,
+                    )
+                ] = value
+            elif key.startswith("y_spatial_prior_s3"):
+                converted[
+                    key.replace(
+                        "y_spatial_prior_s3",
+                        "latent_codec.spatial_prior_s3",
+                        1,
+                    )
+                ] = value
+            elif key.startswith("context_net"):
+                converted[
+                    key.replace("context_net", "latent_codec.context_net", 1)
+                ] = value
+            elif key.startswith("attn_s1"):
+                converted[
+                    key.replace("attn_s1", "latent_codec.attn_s1", 1)
+                ] = value
+            elif key.startswith("attn_s2"):
+                converted[
+                    key.replace("attn_s2", "latent_codec.attn_s2", 1)
+                ] = value
+            elif key.startswith("attn_s3"):
+                converted[
+                    key.replace("attn_s3", "latent_codec.attn_s3", 1)
+                ] = value
+            elif key.startswith("adaptive_params_list"):
+                converted[
+                    key.replace(
+                        "adaptive_params_list",
+                        "latent_codec.adaptive_params",
+                        1,
+                    )
+                ] = value
+            else:
+                # Pass through unknown keys; load_state_dict will surface them
+                # as `unexpected_keys` if the model doesn't claim them.
+                converted[key] = value
+    return converted
