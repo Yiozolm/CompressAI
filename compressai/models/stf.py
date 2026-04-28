@@ -25,7 +25,62 @@ from compressai.models._bases import (
 from compressai.models.utils import conv, deconv
 from compressai.registry import register_model
 
-__all__ = ["SymmetricalTransFormer", "WACNN"]
+__all__ = [
+    "SymmetricalTransFormer",
+    "WACNN",
+    "convert_upstream_stf_state_dict",
+]
+
+
+_UPSTREAM_LATENT_CODEC_PREFIXES = (
+    "cc_mean_transforms",
+    "cc_scale_transforms",
+    "lrp_transforms",
+    "gaussian_conditional",
+)
+
+
+def convert_upstream_stf_state_dict(state_dict: Dict[str, Tensor]) -> Dict[str, Tensor]:
+    """Translate a candidate ``STF`` / ``WACNN`` state dict into compressai layout.
+
+    Upstream checkpoints (``stf_<bpp>_best.pth.tar`` / ``cnn_<bpp>_best.pth.tar``
+    from `Zou et al. 2022 <https://arxiv.org/abs/2203.08450>`_) are saved from a
+    ``DataParallel``-wrapped module and place the channel-conditional entropy
+    transforms at the model root. compressai houses those transforms (plus the
+    Gaussian conditional) under ``latent_codec.*``. This helper:
+
+    - strips the leading ``module.`` prefix added by ``DataParallel``;
+    - re-roots ``cc_mean_transforms`` / ``cc_scale_transforms`` /
+      ``lrp_transforms`` / ``gaussian_conditional`` under ``latent_codec.``;
+    - leaves ``g_a`` / ``g_s`` / ``patch_embed`` / ``layers`` / ``syn_layers``
+      / ``end_conv`` / ``h_a`` / ``h_mean_s`` / ``h_scale_s`` /
+      ``entropy_bottleneck`` keys unchanged.
+
+    The returned dict can be loaded by :meth:`WACNN.from_state_dict` or
+    :meth:`SymmetricalTransFormer.from_state_dict`. Both ``from_state_dict``
+    entry points auto-detect the upstream layout and call this helper, so
+    direct invocation is only needed when persisting the converted dict.
+    """
+    converted: Dict[str, Tensor] = {}
+    for key, value in state_dict.items():
+        new_key = key[len("module."):] if key.startswith("module.") else key
+        head = new_key.split(".", 1)[0]
+        if head in _UPSTREAM_LATENT_CODEC_PREFIXES:
+            new_key = "latent_codec." + new_key
+        converted[new_key] = value
+    return converted
+
+
+def _is_upstream_stf_state_dict(state_dict: Dict[str, Tensor]) -> bool:
+    """Heuristic: upstream checkpoints either carry a ``module.`` prefix or
+    place ``cc_mean_transforms`` at the root instead of under ``latent_codec``.
+    """
+    for key in state_dict:
+        if key.startswith("module."):
+            return True
+        if key.startswith("cc_mean_transforms.") or key.startswith("gaussian_conditional."):
+            return True
+    return False
 
 
 @register_model("stf-wacnn")
@@ -141,6 +196,8 @@ class WACNN(SliceEntropyCompressionModel):
 
     @classmethod
     def from_state_dict(cls, state_dict: Dict[str, Tensor]) -> "WACNN":
+        if _is_upstream_stf_state_dict(state_dict):
+            state_dict = convert_upstream_stf_state_dict(state_dict)
         N = state_dict["g_a.0.weight"].size(0)
         M = state_dict["g_a.7.weight"].size(0)
         num_slices = infer_num_slices(state_dict) or 10
@@ -350,6 +407,8 @@ class SymmetricalTransFormer(SliceEntropyCompressionModel):
 
     @classmethod
     def from_state_dict(cls, state_dict: Dict[str, Tensor]) -> "SymmetricalTransFormer":
+        if _is_upstream_stf_state_dict(state_dict):
+            state_dict = convert_upstream_stf_state_dict(state_dict)
         patch_size = state_dict["patch_embed.proj.weight"].size(2)
         embed_dim = state_dict["patch_embed.proj.weight"].size(0)
         layer_indices = sorted(
