@@ -34,6 +34,7 @@ from .checkerboard import CheckerboardLatentCodec
 from .entropy_bottleneck import EntropyBottleneckLatentCodec
 from .gain import GainHyperLatentCodec, GainHyperpriorLatentCodec
 from .gaussian_conditional import GaussianConditionalLatentCodec
+from .hpcm import HierarchicalProgressiveLatentCodec
 from .hyper import HyperLatentCodec
 from .hyperprior import HyperpriorLatentCodec
 from .mambaic import MambaICLatentCodec
@@ -50,6 +51,7 @@ __all__ = [
     "GainHyperLatentCodec",
     "GainHyperpriorLatentCodec",
     "GaussianConditionalLatentCodec",
+    "HierarchicalProgressiveLatentCodec",
     "HyperLatentCodec",
     "HyperpriorLatentCodec",
     "MambaICLatentCodec",

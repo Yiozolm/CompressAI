@@ -39,6 +39,7 @@ from compressai.models import (
     FactorizedPriorReLU,
     FrequencyAwareTransFormer,
     GLIC,
+    HPCM,
     InvCompress,
     MambaIC,
     MambaVC,
@@ -63,6 +64,10 @@ __all__ = [
     "dcae",
     "ftic",
     "glic",
+    "hpcm",
+    "hpcm_base",
+    "hpcm_large",
+    "hpcm_phi",
     "invcompress",
     "mambaic",
     "mambavc",
@@ -102,6 +107,10 @@ candidate_model_architectures = {
     "saaf": SAAF,
     "weconvene": WeConvene if is_pytorch_wavelets_available() else None,
     "ftic": FrequencyAwareTransFormer,
+    "hpcm": HPCM,
+    "hpcm-base": HPCM,
+    "hpcm-large": HPCM,
+    "hpcm-phi": HPCM,
     "invcompress": InvCompress if is_freia_available() else None,
     "cca": None,
     "mambaic": MambaIC,
@@ -340,6 +349,56 @@ def glic(pretrained: bool = False, progress: bool = True, **kwargs):
     if pretrained:
         raise RuntimeError("Pre-trained model not yet available")
     return GLIC(**kwargs)
+
+
+def _hpcm_default_kwargs(variant: str) -> dict:
+    if variant == "base":
+        return dict(g_a_depth=2, g_s_depth=2, y_prior_depth=2, use_attention=True)
+    if variant == "large":
+        return dict(g_a_depth=6, g_s_depth=6, y_prior_depth=3, use_attention=True)
+    if variant == "phi":
+        return dict(g_a_depth=2, g_s_depth=2, y_prior_depth=2, use_attention=False)
+    raise ValueError(f"Unknown HPCM variant: {variant}")
+
+
+def hpcm(pretrained: bool = False, progress: bool = True, **kwargs):
+    """HPCM (Hierarchical Progressive Context Modeling), default base variant."""
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    cfg = _hpcm_default_kwargs("base")
+    cfg.update(kwargs)
+    return HPCM(**cfg)
+
+
+def hpcm_base(pretrained: bool = False, progress: bool = True, **kwargs):
+    """HPCM_Base — base depth, with cross-attention progressive context fusion."""
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    cfg = _hpcm_default_kwargs("base")
+    cfg.update(kwargs)
+    return HPCM(**cfg)
+
+
+def hpcm_large(pretrained: bool = False, progress: bool = True, **kwargs):
+    """HPCM_Large — deeper analysis/synthesis and y prior, with cross-attention."""
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    cfg = _hpcm_default_kwargs("large")
+    cfg.update(kwargs)
+    return HPCM(**cfg)
+
+
+def hpcm_phi(pretrained: bool = False, progress: bool = True, **kwargs):
+    """HPCM_Phi — base depth without cross-attention (uses ψᵢ as progressive context)."""
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    cfg = _hpcm_default_kwargs("phi")
+    cfg.update(kwargs)
+    return HPCM(**cfg)
 
 
 def cmic(pretrained: bool = False, progress: bool = True, **kwargs):

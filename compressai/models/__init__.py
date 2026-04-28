@@ -33,6 +33,7 @@ from .dcae import *
 from .ftic import *
 from .glic import *
 from .google import *
+from .hpcm import *
 from .invcompress import *
 from .mambaic import *
 from .mambavc import *

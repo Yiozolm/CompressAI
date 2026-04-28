@@ -1,3 +1,4 @@
+from .cross_window import WindowedCrossAttention
 from .inference import (
     infer_swatten_attention_dim,
     infer_swatten_head_dim,
@@ -32,6 +33,7 @@ __all__ = [
     "WinNoShiftAttention",
     "Win_noShift_Attention",
     "WindowAttention",
+    "WindowedCrossAttention",
     "build_window_attention_mask",
     "infer_swatten_attention_dim",
     "infer_swatten_head_dim",

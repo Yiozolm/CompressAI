@@ -6,6 +6,11 @@ from .blocks import (
     OLP,
     ResidualBottleneckBlock,
 )
+from .hpcm import (
+    DWConvResBlock,
+    PartialConv3x3,
+    PConvResBlock,
+)
 from .invertible import (
     CouplingLayer,
     DenseBlock,
@@ -83,6 +88,7 @@ __all__ = [
     "DepthwiseConv5x5",
     "DenoisingAsRegularizer",
     "DWConv",
+    "DWConvResBlock",
     "EnhBlock",
     "GatedFFN",
     "GatedTransformCNN",
@@ -99,6 +105,8 @@ __all__ = [
     "MutiScaleDictionaryCrossAttentionGLU",
     "OLP",
     "AdaptiveFrequencyBlock",
+    "PartialConv3x3",
+    "PConvResBlock",
     "ResidualBottleneckBlock",
     "ResidualBottleneckBlockWithStride",
     "ResidualBottleneckBlockWithUpsample",
