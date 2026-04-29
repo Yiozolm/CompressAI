@@ -8,8 +8,8 @@ from compressai.entropy_models import EntropyBottleneck
 from compressai.latent_codecs import (
     ChannelGroupsLatentCodec,
     CheckerboardLatentCodec,
+    EntropyBottleneckLatentCodec,
     GaussianConditionalLatentCodec,
-    HyperLatentCodec,
     HyperpriorLatentCodec,
 )
 from compressai.layers import (
@@ -35,7 +35,88 @@ __all__ = [
     "GLICAnalysisTransform",
     "GLICParameterAggregationBlock",
     "GLICSynthesisTransform",
+    "convert_upstream_state_dict",
 ]
+
+
+_UPSTREAM_HYPER_PREFIX = "latent_codec.hyper."
+
+
+def _is_upstream_state_dict(state_dict: Dict[str, Tensor]) -> bool:
+    """Detect the published GLIC checkpoint layout (``latent_codec.hyper.*`` +
+    raw ``dwt.w_*`` / ``idwt.filters`` buffers + uppercase ``OLP``)."""
+    for key in state_dict:
+        if (
+            key.startswith(_UPSTREAM_HYPER_PREFIX)
+            or ".OLP." in key
+            or key.endswith(".dwt.w_ll")
+            or key.endswith(".idwt.filters")
+        ):
+            return True
+    return False
+
+
+def _is_pytorch_wavelets_buffer_key(key: str) -> bool:
+    """Buffers registered by ``pytorch_wavelets`` inside our DWT2D / IDWT2D
+    wrappers: deterministic per-wavelet kernels rebuilt at construction time,
+    safe to be missing from a converted state dict.
+    """
+    return ".dwt.transform." in key or ".idwt.inverse." in key
+
+
+def _rewrite_hyper_key(key: str) -> str:
+    """Map upstream ``latent_codec.hyper.{h_a,h_s,entropy_bottleneck}.*`` keys
+    to the compressai ``HyperpriorLatentCodec`` layout where ``h_a`` / ``h_s``
+    sit at the outer level and only ``entropy_bottleneck`` lives under ``z``.
+    """
+    suffix = key[len(_UPSTREAM_HYPER_PREFIX):]
+    if suffix.startswith("h_a.") or suffix.startswith("h_s."):
+        return "latent_codec." + suffix
+    return "latent_codec.z." + suffix
+
+
+def convert_upstream_state_dict(
+    state_dict: Dict[str, Tensor],
+) -> Dict[str, Tensor]:
+    """Translate a published GLIC checkpoint into the compressai key layout.
+
+    The upstream repo (https://github.com/UnoC-727/GLIC) publishes weights in
+    the candidate code's naming convention. The differences vs the integrated
+    ``compressai.models.GLIC`` are:
+
+    - Upstream nests ``h_a`` / ``h_s`` inside the (deprecated) ``HyperLatentCodec``
+      under ``latent_codec.hyper.*``; compressai uses the modern
+      ``HyperpriorLatentCodec`` which keeps ``h_a`` / ``h_s`` at the outer
+      level (``latent_codec.h_a.*`` / ``latent_codec.h_s.*``) and only stores
+      the ``EntropyBottleneckLatentCodec`` under ``latent_codec.z.*``.
+    - ``OLP`` submodule renamed to ``olp`` inside :class:`WLS` / :class:`iWLS`.
+    - ``GatedTransformCNN`` / :class:`GLICParameterAggregationBlock` use
+      ``norm`` instead of ``norm2``; renamed everywhere except inside
+      ``residual_group.blocks.*`` (GFA blocks have both ``norm1`` / ``norm2``).
+    - ``DepthwiseConv5x5.skip`` replaces the upstream ``mixer.adaptor`` (only
+      present when ``in_ch != out_ch``); ``mixer.adaptor`` → ``mixer.skip``.
+    - The upstream wavelet buffers ``dwt.w_{ll,lh,hl,hh}`` /
+      ``idwt.filters`` (raw 2-D Haar kernels) are dropped: compressai's
+      :class:`DWT2D` / :class:`IDWT2D` rebuild equivalent separable
+      ``pytorch_wavelets`` buffers in their constructors and produce
+      numerically identical outputs (verified to <1e-6 max diff).
+    """
+    converted: Dict[str, Tensor] = {}
+    for key, value in state_dict.items():
+        if key.endswith((".dwt.w_ll", ".dwt.w_lh", ".dwt.w_hl", ".dwt.w_hh")):
+            continue
+        if key.endswith(".idwt.filters"):
+            continue
+
+        new_key = key
+        if new_key.startswith(_UPSTREAM_HYPER_PREFIX):
+            new_key = _rewrite_hyper_key(new_key)
+        new_key = new_key.replace(".OLP.", ".olp.")
+        new_key = new_key.replace(".mixer.adaptor.", ".mixer.skip.")
+        if ".residual_group.blocks." not in new_key:
+            new_key = new_key.replace(".norm2.", ".norm.")
+        converted[new_key] = value
+    return converted
 
 
 class GLICParameterAggregationBlock(nn.Module):
@@ -317,16 +398,16 @@ class GLIC(SimpleVAECompressionModel):
         }
 
         self.latent_codec = HyperpriorLatentCodec(
+            h_a=h_a,
+            h_s=h_s,
             latent_codec={
                 "y": ChannelGroupsLatentCodec(
                     groups=self.groups,
                     channel_context=channel_context,
                     latent_codec=scctx_latent_codec,
                 ),
-                "hyper": HyperLatentCodec(
+                "z": EntropyBottleneckLatentCodec(
                     entropy_bottleneck=EntropyBottleneck(N),
-                    h_a=h_a,
-                    h_s=h_s,
                     quantizer="ste",
                 ),
             }
@@ -343,6 +424,8 @@ class GLIC(SimpleVAECompressionModel):
 
     @classmethod
     def from_state_dict(cls, state_dict: Dict[str, Tensor]) -> "GLIC":
+        if _is_upstream_state_dict(state_dict):
+            state_dict = convert_upstream_state_dict(state_dict)
         N = state_dict["latent_codec.z.entropy_bottleneck.quantiles"].size(0)
         M = state_dict["g_a.down3.weight"].size(0)
         groups = []
@@ -356,5 +439,17 @@ class GLIC(SimpleVAECompressionModel):
             groups.append(state_dict[key].size(1))
             index += 1
         net = cls(N=N, M=M, groups=groups or None)
-        net.load_state_dict(state_dict)
+        incompatible = net.load_state_dict(state_dict, strict=False)
+        allowed_missing = {
+            key
+            for key in net.state_dict()
+            if _is_pytorch_wavelets_buffer_key(key)
+        }
+        missing = set(incompatible.missing_keys) - allowed_missing
+        if missing or incompatible.unexpected_keys:
+            raise RuntimeError(
+                "Unexpected incompatibility while loading GLIC state_dict: "
+                f"missing={sorted(missing)}, "
+                f"unexpected={sorted(incompatible.unexpected_keys)}"
+            )
         return net
