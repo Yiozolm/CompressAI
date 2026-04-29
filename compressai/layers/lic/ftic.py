@@ -315,9 +315,9 @@ class SwinFDWA(nn.Module):
         branch_qkv = qkv.chunk(4, dim=-1)
         shifts = (
             (self.split_size, self.split_size),
-            (max(1, self.split_size // 4), max(1, self.split_size // 4)),
-            (max(1, self.split_size // 4), self.split_size),
-            (self.split_size, max(1, self.split_size // 4)),
+            (self.split_size // 4, self.split_size // 4),
+            (self.split_size // 4, self.split_size),
+            (self.split_size, self.split_size // 4),
         )
 
         outputs = []
