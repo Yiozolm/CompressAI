@@ -52,6 +52,7 @@ from compressai.models import (
     SAAF,
     ShiftLIC,
     TCM,
+    TIC,
     TinyLIC,
     WACNN,
     WeConvene,
@@ -961,6 +962,39 @@ class TestModels:
         assert len(compressed["strings"][0]) == 1  # one packed y bytestring
         assert len(compressed["strings"][1]) == x.size(0)  # per-sample z
         assert decoded["x_hat"].shape == x.shape
+
+    def test_tic(self):
+        # Default config (N=128, M=192). Use 256x256 to give the deepest g_a5
+        # stage (32x32) a window-size==8 attention map.
+        model = TIC(N=128, M=192)
+        model.eval()
+        x = torch.rand(1, 3, 256, 256)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert "x_hat" in out
+        assert "likelihoods" in out
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 192, 16, 16)
+        assert out["likelihoods"]["z"].shape == (1, 128, 4, 4)
+
+        # state_dict roundtrip via from_state_dict.
+        loaded = TIC.from_state_dict(model.state_dict())
+        assert loaded.N == 128
+        assert loaded.M == 192
+
+        # Smaller config + minimum valid input (128, divisible by 64) to keep
+        # the autoregressive bitstream roundtrip fast.
+        small = TIC(N=32, M=48)
+        small.eval()
+        small.update(force=True)
+        xs = torch.rand(1, 3, 128, 128)
+        with torch.no_grad():
+            compressed = small.compress(xs)
+            decoded = small.decompress(compressed["strings"], compressed["shape"])
+        assert len(compressed["strings"]) == 2
+        assert decoded["x_hat"].shape == xs.shape
 
     @pytest.mark.parametrize("variant", ["small", "middle", "large"])
     def test_shiftlic(self, variant):

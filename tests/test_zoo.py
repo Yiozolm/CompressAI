@@ -49,6 +49,7 @@ from compressai.models import (
     ScaleHyperprior,
     ShiftLIC,
     TCM,
+    TIC,
     TinyLIC,
     WeConvene,
 )
@@ -78,6 +79,7 @@ from compressai.zoo import (
     shiftlic_middle,
     shiftlic_small,
     tcm,
+    tic,
     tinylic,
     weconvene,
 )
@@ -362,6 +364,15 @@ class TestCandidateModels:
 
         with pytest.raises(RuntimeError, match="Pre-trained TinyLIC weights"):
             tinylic(pretrained=True)
+
+    def test_tic(self):
+        net = tic(N=128, M=192)
+
+        assert isinstance(net, TIC)
+        assert candidate_model_architectures["tic"] is TIC
+
+        with pytest.raises(RuntimeError, match="not yet available"):
+            tic(pretrained=True)
 
     @pytest.mark.parametrize(
         "factory,variant",

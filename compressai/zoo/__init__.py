@@ -57,6 +57,7 @@ from .image import (
     stf,
     stf_wacnn,
     tcm,
+    tic,
     tinylic,
     weconvene,
 )
@@ -89,6 +90,7 @@ image_models = {
     "stf-wacnn": stf_wacnn,
     "lic-tcm": tcm,
     "tcm": tcm,
+    "tic": tic,
     "tinylic": tinylic,
     "weconvene": weconvene,
     "mbt2018-mean": mbt2018_mean,

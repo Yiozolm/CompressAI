@@ -52,6 +52,7 @@ from compressai.models import (
     ShiftLIC,
     SymmetricalTransFormer,
     TCM,
+    TIC,
     TinyLIC,
     WeConvene,
     WACNN,
@@ -83,6 +84,7 @@ __all__ = [
     "stf",
     "stf_wacnn",
     "tcm",
+    "tic",
     "tinylic",
     "weconvene",
     "mbt2018",
@@ -124,6 +126,7 @@ candidate_model_architectures = {
     "mambaic": MambaIC,
     "mambavc": MambaVC,
     "tinylic": TinyLIC,
+    "tic": TIC,
     "shiftlic-small": ShiftLIC,
     "shiftlic-middle": ShiftLIC,
     "shiftlic-large": ShiftLIC,
@@ -492,6 +495,18 @@ def tinylic(pretrained: bool = False, progress: bool = True, **kwargs):
             "repository for NJU Box download links."
         )
     return TinyLIC(**kwargs)
+
+
+def tic(pretrained: bool = False, progress: bool = True, **kwargs):
+    """TIC — Transformer-based Image Compression (Lu et al., DCC 2022).
+
+    `arXiv:2111.06707 <https://arxiv.org/abs/2111.06707>`_. Pre-trained
+    weights are not mirrored.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return TIC(**kwargs)
 
 
 def _shiftlic_factory(variant: str):

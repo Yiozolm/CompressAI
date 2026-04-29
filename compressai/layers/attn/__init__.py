@@ -1,3 +1,4 @@
+from .cam import CausalAttentionModule
 from .cross_window import WindowedCrossAttention
 from .inference import (
     infer_swatten_attention_dim,
@@ -9,6 +10,13 @@ from .nsa import (
     Mlp,
     NSABlock,
     ResViTBlock,
+)
+from .rstb import (
+    BasicSwinLayer,
+    PatchEmbed1D,
+    PatchUnEmbed1D,
+    RSTB,
+    SwinTransformerBlock,
 )
 from .swin import (
     Block,
@@ -29,16 +37,22 @@ from .swin_attention import (
 )
 
 __all__ = [
+    "BasicSwinLayer",
     "BasicViTLayer",
     "Block",
+    "CausalAttentionModule",
     "ConvTransBlock",
     "Mlp",
     "NSABlock",
+    "PatchEmbed1D",
     "PatchMerging",
     "PatchSplit",
+    "PatchUnEmbed1D",
+    "RSTB",
     "ResViTBlock",
     "SWAtten",
     "SwinBlock",
+    "SwinTransformerBlock",
     "WMSA",
     "WinNoShiftAttention",
     "Win_noShift_Attention",

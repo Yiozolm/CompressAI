@@ -45,6 +45,7 @@ from .sensetime import *
 from .shiftlic import *
 from .stf import *
 from .tcm import *
+from .tic import *
 from .tinylic import *
 from .vbr import *
 from .waseda import *
