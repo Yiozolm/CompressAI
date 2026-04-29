@@ -40,6 +40,7 @@ from compressai.latent_codecs import (
     WeChARMLatentCodec,
 )
 from compressai.models import (
+    CCAModel,
     CMIC,
     DCAE,
     FrequencyAwareTransFormer,
@@ -867,6 +868,49 @@ class TestModels:
         assert len(compressed["strings"][0]) == x.size(0)
         assert len(compressed["strings"][1]) == x.size(0)
         assert decoded["x_hat"].shape == x.shape
+
+    def test_cca(self):
+        model = CCAModel(
+            latent_channels=32,
+            hyper_channels=16,
+            slice_proportions=(1, 1, 1, 1),
+            encoder_dims=(16, 16, 24),
+            encoder_layers=(1, 1, 1),
+            em_hidden_channels=24,
+            em_num_layers=1,
+            cca_training=True,
+        )
+        model.eval()
+        x = torch.rand(1, 3, 64, 64)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 32, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 16, 1, 1)
+        assert out["aux_likelihoods"]["y_aux"].shape == (1, 32, 4, 4)
+        assert out["aux_likelihoods"]["y_cca"].shape == (1, 32, 4, 4)
+
+        loaded = CCAModel.from_state_dict(model.state_dict())
+        assert loaded.M == 32
+        assert loaded.N == 16
+        assert loaded.num_slices == 4
+        assert loaded.cca_training is True
+
+        infer = CCAModel(
+            latent_channels=32,
+            hyper_channels=16,
+            slice_proportions=(1, 1, 1, 1),
+            encoder_dims=(16, 16, 24),
+            encoder_layers=(1, 1, 1),
+            em_hidden_channels=24,
+            em_num_layers=1,
+            cca_training=False,
+        )
+        with torch.no_grad():
+            out_no_aux = infer(x)
+        assert out_no_aux["aux_likelihoods"] is None
 
     def test_invcompress_missing_dependency(self):
         if is_freia_available():

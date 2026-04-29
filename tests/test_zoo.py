@@ -31,6 +31,7 @@ import pytest
 
 from compressai.layers import is_freia_available, is_pytorch_wavelets_available
 from compressai.models import (
+    CCAModel,
     CMIC,
     Cheng2020Anchor,
     Cheng2020Attention,
@@ -53,6 +54,7 @@ from compressai.zoo import (
     bmshj2018_factorized,
     bmshj2018_factorized_relu,
     bmshj2018_hyperprior,
+    cca,
     cheng2020_anchor,
     cheng2020_attn,
     candidate_model_architectures,
@@ -266,6 +268,24 @@ class TestCandidateModels:
 
         with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
             saaf(pretrained=True)
+
+    def test_cca(self):
+        net = cca(
+            latent_channels=32,
+            hyper_channels=16,
+            slice_proportions=(1, 1, 1, 1),
+            encoder_dims=(16, 16, 24),
+            encoder_layers=(1, 1, 1),
+            em_hidden_channels=24,
+            em_num_layers=1,
+            cca_training=True,
+        )
+
+        assert isinstance(net, CCAModel)
+        assert candidate_model_architectures["cca"] is CCAModel
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            cca(pretrained=True)
 
     def test_invcompress_missing_dependency(self):
         if is_freia_available():

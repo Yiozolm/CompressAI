@@ -31,6 +31,7 @@ from torch.hub import load_state_dict_from_url
 
 from compressai.layers import is_freia_available, is_pytorch_wavelets_available
 from compressai.models import (
+    CCAModel,
     CMIC,
     Cheng2020Anchor,
     Cheng2020Attention,
@@ -60,6 +61,7 @@ __all__ = [
     "bmshj2018_factorized",
     "bmshj2018_factorized_relu",
     "bmshj2018_hyperprior",
+    "cca",
     "cmic",
     "dcae",
     "ftic",
@@ -112,7 +114,7 @@ candidate_model_architectures = {
     "hpcm-large": HPCM,
     "hpcm-phi": HPCM,
     "invcompress": InvCompress if is_freia_available() else None,
-    "cca": None,
+    "cca": CCAModel,
     "mambaic": MambaIC,
     "mambavc": MambaVC,
 }
@@ -411,6 +413,14 @@ def cmic(pretrained: bool = False, progress: bool = True, **kwargs):
             "Install `compressai[lic]` to enable this model."
         )
     return CMIC(**kwargs)
+
+
+def cca(pretrained: bool = False, progress: bool = True, **kwargs):
+    """CCA — standalone CCA-loss autoencoder (Han et al., NeurIPS 2024)."""
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return CCAModel(**kwargs)
 
 
 def dcae(pretrained: bool = False, progress: bool = True, **kwargs):
