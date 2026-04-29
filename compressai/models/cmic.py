@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import math
+import re
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, cast
 
+import torch
 import torch.nn as nn
 
 from torch import Tensor
@@ -31,7 +33,12 @@ from compressai.registry import register_model
 
 from .base import SimpleVAECompressionModel
 
-__all__ = ["CMIC", "CMICAnalysisTransform", "CMICSynthesisTransform"]
+__all__ = [
+    "CMIC",
+    "CMICAnalysisTransform",
+    "CMICSynthesisTransform",
+    "convert_upstream_state_dict",
+]
 
 _ModelType = TypeVar("_ModelType", bound=type[nn.Module])
 
@@ -64,6 +71,140 @@ def _default_groups(M: int) -> List[int]:
     for index in range(remainder):
         groups[-(index + 1)] += 1
     return [group for group in groups if group > 0]
+
+
+_CMIC_STAGE_PREFIXES = ("g_a.g2.", "g_a.g3.", "g_s.g1.", "g_s.g2.")
+
+
+def _is_upstream_state_dict(state_dict: Dict[str, Tensor]) -> bool:
+    return any(
+        ".residual_group.layers." in key
+        or key.startswith("latent_codec.hyper.")
+        for key in state_dict
+    )
+
+
+def convert_upstream_state_dict(
+    state_dict: Dict[str, Tensor],
+) -> Dict[str, Tensor]:
+    """Translate an upstream ``CMIC_AuxT`` checkpoint to compressai layout.
+
+    Handles all known structural and naming differences:
+
+    * drops candidate-side DWT/IDWT haar-coefficient buffers (compressai
+      reinitialises them through ``pytorch_wavelets``);
+    * renames ``OLP`` to ``olp`` inside ``WLS``/``iWLS`` modules;
+    * inside ``CMIC_stage`` blocks (``g_a.g2``/``g_a.g3``/``g_s.g1``/``g_s.g2``):
+      ``residual_group.layers.{j}`` -> ``blocks.{j}``,
+      ``wqkv``/``win_mhsa`` -> ``window_attention.qkv``/``window_attention``,
+      ``convffn{i}.conv`` -> ``feed_forward{i}.depthwise``,
+      ``convffn{i}`` -> ``feed_forward{i}``,
+      ``assm`` -> ``content_model`` with ``selectiveScan`` flattened,
+      ``in_proj.0``/``CPE.0`` -> ``in_proj``/``cpe``,
+      ``cal_embedding`` -> ``prompt_proj``;
+    * candidate-side ``win_mhsa.relative_position_bias_table`` is zeroed since
+      the upstream forward never adds it; compressai's forward does;
+    * hyperprior layout: ``latent_codec.hyper.{h_a,h_s}`` is hoisted to
+      ``latent_codec.{h_a,h_s}`` and ``latent_codec.hyper.entropy_bottleneck``
+      becomes ``latent_codec.z.entropy_bottleneck``;
+    * spatial context: ``ly{1,2}`` -> ``layer{1,2}``, ``mixer.depth_conv`` ->
+      ``mixer.masked_conv``;
+    * ``norm2`` -> ``norm`` for ``GatedTransformCNN``/``Param_Gated``/
+      ``Param_Agg_Block`` (CMIC block ``norm{1..4}`` are preserved);
+    * ``mixer.adaptor`` -> ``mixer.skip`` for residual depthwise mixers.
+    """
+    new_state_dict: Dict[str, Tensor] = {}
+
+    for key, value in state_dict.items():
+        if re.search(r"AuxT_(?:enc|dec)\.\d+\.dwt\.w_(?:ll|lh|hl|hh)$", key):
+            continue
+        if re.search(r"AuxT_(?:enc|dec)\.\d+\.(?:dwt|idwt)\.filters$", key):
+            continue
+
+        new_key = key
+        new_value = value
+
+        new_key = re.sub(
+            r"(AuxT_(?:enc|dec)\.\d+)\.OLP\.", r"\1.olp.", new_key
+        )
+
+        is_cmic_stage = any(prefix in key for prefix in _CMIC_STAGE_PREFIXES)
+        if is_cmic_stage:
+            new_key = re.sub(
+                r"\.residual_group\.layers\.(\d+)\.",
+                r".blocks.\1.",
+                new_key,
+            )
+            new_key = re.sub(
+                r"\.blocks\.(\d+)\.wqkv\.",
+                r".blocks.\1.window_attention.qkv.",
+                new_key,
+            )
+            new_key = re.sub(
+                r"\.blocks\.(\d+)\.win_mhsa\.",
+                r".blocks.\1.window_attention.",
+                new_key,
+            )
+            new_key = re.sub(
+                r"\.convffn(\d)\.conv\.",
+                r".feed_forward\1.depthwise.",
+                new_key,
+            )
+            new_key = re.sub(
+                r"\.convffn(\d)\.", r".feed_forward\1.", new_key
+            )
+            if ".assm." in new_key:
+                new_key = new_key.replace(".assm.", ".content_model.")
+                new_key = new_key.replace(
+                    ".content_model.selectiveScan.", ".content_model."
+                )
+                new_key = re.sub(
+                    r"\.content_model\.in_proj\.0\.",
+                    r".content_model.in_proj.",
+                    new_key,
+                )
+                new_key = re.sub(
+                    r"\.content_model\.CPE\.0\.",
+                    r".content_model.cpe.",
+                    new_key,
+                )
+                new_key = new_key.replace(
+                    ".content_model.cal_embedding.",
+                    ".content_model.prompt_proj.",
+                )
+
+        new_key = new_key.replace(
+            "latent_codec.hyper.entropy_bottleneck.",
+            "latent_codec.z.entropy_bottleneck.",
+        )
+        new_key = new_key.replace(
+            "latent_codec.hyper.h_a.", "latent_codec.h_a."
+        )
+        new_key = new_key.replace(
+            "latent_codec.hyper.h_s.", "latent_codec.h_s."
+        )
+
+        new_key = re.sub(
+            r"context_prediction\.ly(\d)\.",
+            r"context_prediction.layer\1.",
+            new_key,
+        )
+        if "context_prediction.layer" in new_key:
+            new_key = new_key.replace(
+                "mixer.depth_conv.", "mixer.masked_conv."
+            )
+
+        if not re.match(r"g_[as]\.g\d+\.blocks\.\d+\.norm[1234]\.", new_key):
+            new_key = new_key.replace(".norm2.", ".norm.")
+
+        new_key = new_key.replace(".mixer.adaptor.", ".mixer.skip.")
+
+        if new_key.endswith(".window_attention.relative_position_bias_table"):
+            new_value = torch.zeros_like(value)
+
+        new_state_dict[new_key] = new_value
+
+    return new_state_dict
 
 
 @_maybe_register_model("cmic")
@@ -168,11 +309,9 @@ class CMIC(SimpleVAECompressionModel):
                 self.groups[k] * 2,
                 min_ch=N,
                 num_layers=3,
-                make_layer=CMICChannelContextBlock,
+                make_layer=GatedTransformCNN,
                 make_act=lambda: nn.Identity(),
-                kernel_size=5,
-                stride=1,
-                padding=2,
+                expansion_factor=4,
             )
             for k in range(1, len(self.groups))
         }
@@ -231,6 +370,9 @@ class CMIC(SimpleVAECompressionModel):
 
     @classmethod
     def from_state_dict(cls, state_dict: Dict[str, Tensor]) -> "CMIC":
+        if _is_upstream_state_dict(state_dict):
+            state_dict = convert_upstream_state_dict(state_dict)
+
         N = state_dict["latent_codec.z.entropy_bottleneck.quantiles"].size(0)
         M = state_dict["g_a.down3.weight"].size(0)
         stage_dims = (
@@ -262,6 +404,23 @@ class CMIC(SimpleVAECompressionModel):
             window_size=(math.isqrt(table_size) + 1) // 2,
             cluster_num=state_dict["g_a.g2.blocks.0.content_model.means"].size(0),
         )
+
+        # Compressai's WindowAttention registers a `relative_position_index`
+        # buffer, and `pytorch_wavelets`'s `DWTForward`/`DWTInverse` register
+        # their haar coefficient buffers, that the upstream checkpoint does not
+        # ship. Backfill from the freshly-initialised model so we can keep
+        # `strict=True`.
+        init_state_dict = net.state_dict()
+        for key, value in init_state_dict.items():
+            if key in state_dict:
+                continue
+            if (
+                key.endswith(".window_attention.relative_position_index")
+                or ".dwt.transform." in key
+                or ".idwt.inverse." in key
+            ):
+                state_dict[key] = value
+
         net.load_state_dict(state_dict)
         return net
 
