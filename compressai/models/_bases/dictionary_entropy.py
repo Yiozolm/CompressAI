@@ -227,8 +227,8 @@ class DictionaryEntropyCompressionModel(CompressionModel):
                 dictionary,
             )
             _, y_slice_likelihood = self.gaussian_conditional(y_slice, scale, mu)
-            y_hat_slice = torch.round(y_slice - mu) - (y_slice - mu).detach() + y_slice
-            y_hat_slice = y_hat_slice + mu
+            residual = y_slice - mu
+            y_hat_slice = torch.round(residual) - residual.detach() + residual + mu
             lrp = self.lrp_transforms[slice_index](torch.cat([support, y_hat_slice], dim=1))
             y_hat_slice = y_hat_slice + 0.5 * torch.tanh(lrp)
 
