@@ -12,6 +12,23 @@ from compressai.registry import register_criterion
 
 @register_criterion("CCARateDistortionLoss")
 class CCARateDistortionLoss(nn.Module):
+    r"""Causal Context Adjustment rate-distortion loss from M. Han, S. Jiang,
+    S. Li, X. Deng, M. Xu, C. Zhu, S. Gu: `"Causal Context Adjustment Loss
+    for Learned Image Compression" <https://arxiv.org/abs/2410.04847>`_, Adv.
+    in Neural Information Processing Systems 38 (NeurIPS), 2024.
+
+    Combines the standard rate (``bpp``) and distortion (MSE / MS-SSIM) terms
+    with the CCA term that measures the KL-style gap between the main and
+    auxiliary causal-context likelihoods produced by
+    :class:`compressai.entropy_models.CausalContextAdjustmentEntropyModel`.
+
+    Args:
+        lmbda (float): Distortion weight.
+        metric (str): Distortion metric, ``"mse"`` or ``"ms-ssim"``.
+        alpha (float): Weight on the CCA loss term.
+        beta (float): Weight on the bit-rate term.
+    """
+
     def __init__(
         self,
         lmbda: float = 0.01,

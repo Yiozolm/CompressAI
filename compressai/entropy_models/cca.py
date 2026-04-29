@@ -69,6 +69,17 @@ def _make_prediction_head(
 
 
 class CausalContextAdjustmentEntropyModel(nn.Module):
+    r"""Causal Context Adjustment entropy model from M. Han, S. Jiang, S. Li,
+    X. Deng, M. Xu, C. Zhu, S. Gu: `"Causal Context Adjustment Loss for
+    Learned Image Compression" <https://arxiv.org/abs/2410.04847>`_, Adv. in
+    Neural Information Processing Systems 38 (NeurIPS), 2024.
+
+    Augments a Minnen2020-style channel-wise autoregressive entropy model
+    with an auxiliary CCA branch that produces ``y_cca`` likelihoods used by
+    :class:`compressai.losses.CCARateDistortionLoss` to align the causal
+    context with the rate-distortion objective.
+    """
+
     y_entropy_bottleneck: EntropyBottleneck
     gaussian_conditional: GaussianConditional
 

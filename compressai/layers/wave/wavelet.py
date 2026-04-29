@@ -91,7 +91,16 @@ class IDWT2D(nn.Module):
 
 
 class WLS(nn.Module):
-    """Wavelet Linear Scaling analysis block."""
+    r"""Wavelet Linear Scaling (WLS) analysis block from H. Li, S. Li,
+    W. Dai, M. Cao, N. Kan, C. Li, J. Zou, H. Xiong: `"On Disentangled
+    Training for Nonlinear Transform in Learned Image Compression"
+    <https://arxiv.org/abs/2501.13751>`_, Int. Conf. on Learning
+    Representations (ICLR), 2025 (Spotlight).
+
+    Auxiliary downsampling block used by AuxT-style disentangled training:
+    applies a 2D discrete wavelet transform, learnable per-subband scaling
+    factors, and an OLP (overlapping linear projection) channel mixer.
+    """
 
     def __init__(self, in_dim: int, out_dim: int, wave: str = "haar") -> None:
         super().__init__()
@@ -110,7 +119,16 @@ class WLS(nn.Module):
 
 
 class iWLS(nn.Module):
-    """Inverse Wavelet Linear Scaling synthesis block."""
+    r"""Inverse Wavelet Linear Scaling (iWLS) synthesis block from H. Li,
+    S. Li, W. Dai, M. Cao, N. Kan, C. Li, J. Zou, H. Xiong: `"On Disentangled
+    Training for Nonlinear Transform in Learned Image Compression"
+    <https://arxiv.org/abs/2501.13751>`_, Int. Conf. on Learning
+    Representations (ICLR), 2025 (Spotlight).
+
+    Inverse counterpart of :class:`WLS` used in AuxT-style disentangled
+    training: applies an OLP channel mixer, undoes the learnable per-subband
+    scaling, and reconstructs the spatial signal with the inverse 2D DWT.
+    """
 
     def __init__(self, in_dim: int, out_dim: int, wave: str = "haar") -> None:
         super().__init__()
