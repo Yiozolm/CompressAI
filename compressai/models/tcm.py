@@ -154,6 +154,21 @@ def _has_auxt_state(state_dict: Dict[str, Tensor]) -> bool:
     )
 
 
+def _is_auxt_wavelet_buffer_key(key: str) -> bool:
+    if not (key.startswith("AuxT_enc.") or key.startswith("AuxT_dec.")):
+        return False
+    return ".dwt.transform." in key or ".idwt.inverse." in key
+
+
+def _is_auxt_upstream_wavelet_buffer_key(key: str) -> bool:
+    if key.startswith("AuxT_enc.") and ".dwt." in key:
+        suffix = key.rsplit(".", 1)[-1]
+        return suffix in {"w_ll", "w_lh", "w_hl", "w_hh"}
+    if key.startswith("AuxT_dec.") and ".idwt." in key:
+        return key.rsplit(".", 1)[-1] == "filters"
+    return False
+
+
 def _make_entropy_transform(in_channels: int, out_channels: int) -> nn.Sequential:
     return nn.Sequential(
         conv(in_channels, 224, stride=1, kernel_size=3),
@@ -607,7 +622,10 @@ class TCM(CompressionModel):
         )
         incompatible_keys = net.load_state_dict(state_dict, strict=False)
         allowed_missing = {
-            key for key in net.state_dict() if key.endswith("relative_position_index")
+            key
+            for key in net.state_dict()
+            if key.endswith("relative_position_index")
+            or _is_auxt_wavelet_buffer_key(key)
         }
         missing_keys = set(incompatible_keys.missing_keys) - allowed_missing
         if missing_keys or incompatible_keys.unexpected_keys:
@@ -622,7 +640,11 @@ class TCM(CompressionModel):
     def _migrate_state_dict(cls, state_dict: Dict[str, Tensor]) -> Dict[str, Tensor]:
         migrated: Dict[str, Tensor] = {}
         for key, value in state_dict.items():
+            if _is_auxt_upstream_wavelet_buffer_key(key):
+                continue
             new_key = key
+            if new_key.startswith("AuxT_enc.") or new_key.startswith("AuxT_dec."):
+                new_key = new_key.replace(".OLP.", ".olp.")
             wrapper = _UPSTREAM_SWATTEN_WRAPPER.match(new_key)
             if wrapper:
                 new_key = (
