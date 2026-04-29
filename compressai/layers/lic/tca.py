@@ -168,11 +168,12 @@ class TCABlock(nn.Module):
 
     def forward(self, input_tensor: Tensor) -> Tensor:
         residual = input_tensor
-        output = self.positional_encoding(self.norm1(input_tensor))
-        output, pad_h, pad_w = _pad_to_window_multiple(output, self.window_size)
+        output, pad_h, pad_w = _pad_to_window_multiple(input_tensor, self.window_size)
         batch_size, channels, padded_height, padded_width = output.shape
         height_windows = padded_height // self.window_size
         width_windows = padded_width // self.window_size
+        # Window partition first; norm/CPE then run on the (B*nW, C, ws, ws)
+        # tensor so GroupNorm sees the same per-window statistics as upstream.
         output = output.view(
             batch_size,
             channels,
@@ -182,6 +183,8 @@ class TCABlock(nn.Module):
             self.window_size,
         ).permute(0, 2, 4, 1, 3, 5)
         output = output.reshape(-1, channels, self.window_size, self.window_size)
+
+        output = self.positional_encoding(self.norm1(output))
 
         query = self.q_proj(output).flatten(2).transpose(1, 2)
         key = self.k_proj(output).flatten(2).transpose(1, 2)

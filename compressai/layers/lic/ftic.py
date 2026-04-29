@@ -313,7 +313,19 @@ class SwinFDWA(nn.Module):
         qkv = self.qkv(output).reshape(batch_size, length, 3, channels).permute(2, 0, 1, 3)
         qkv = qkv.view(3, batch_size, height, width, channels)
         branch_qkv = qkv.chunk(4, dim=-1)
-        shifts = (
+        # Match upstream's Python operator-precedence quirk: it writes
+        # ``-split_size // 4``, which parses as ``(-split_size) // 4`` and
+        # differs from ``-(split_size // 4)`` for split_size < 4 (the hyper
+        # transforms use split_size=2, giving -1 vs 0). The rollback path
+        # uses positive ``split_size // 4`` directly, so the asymmetry is
+        # baked into the trained weights and must be preserved.
+        forward_shifts = (
+            (-self.split_size, -self.split_size),
+            (-self.split_size // 4, -self.split_size // 4),
+            (-self.split_size // 4, -self.split_size),
+            (-self.split_size, -self.split_size // 4),
+        )
+        rollback_shifts = (
             (self.split_size, self.split_size),
             (self.split_size // 4, self.split_size // 4),
             (self.split_size // 4, self.split_size),
@@ -323,15 +335,15 @@ class SwinFDWA(nn.Module):
         outputs = []
         for index, qkv_branch in enumerate(branch_qkv):
             if self.shift_size > 0:
-                shift_h, shift_w = shifts[index]
+                shift_h, shift_w = forward_shifts[index]
                 qkv_branch = torch.roll(
                     qkv_branch,
-                    shifts=(-shift_h, -shift_w),
+                    shifts=(shift_h, shift_w),
                     dims=(2, 3),
                 )
             branch_output = self.branch_attentions[index](qkv_branch, spatial_size)
             if self.shift_size > 0:
-                shift_h, shift_w = shifts[index]
+                shift_h, shift_w = rollback_shifts[index]
                 branch_output = torch.roll(
                     branch_output,
                     shifts=(shift_h, shift_w),
