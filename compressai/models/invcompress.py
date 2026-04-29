@@ -23,7 +23,7 @@ from compressai.registry import register_model
 
 from .waseda import Cheng2020Anchor
 
-__all__ = ["InvCompress"]
+__all__ = ["InvCompress", "convert_upstream_state_dict"]
 
 _FREIA_DUMMY_SPATIAL = 16
 _ModelType = TypeVar("_ModelType", bound=type[nn.Module])
@@ -117,18 +117,18 @@ def _build_coupling_layer(channels: int, kernel_size: int) -> CouplingLayer:
     # releases. In particular, the meaning and accepted type of `split_len`
     # differ between versions, so we probe the integer, ratio, and default
     # forms in that order and keep the first one that works.
+    # `clamp_activation="SIGMOID"` reproduces upstream's
+    # `2 * sigmoid(s) - 1` clamp; the FrEIA default ("ATAN") would silently
+    # diverge from the published checkpoints.
+    base_kwargs = {
+        "subnet_constructor": subnet_constructor,
+        "clamp": 1.0,
+        "clamp_activation": "SIGMOID",
+    }
     candidates = (
-        {
-            "subnet_constructor": subnet_constructor,
-            "clamp": 1.0,
-            "split_len": split_length,
-        },
-        {
-            "subnet_constructor": subnet_constructor,
-            "clamp": 1.0,
-            "split_len": split_length / channels,
-        },
-        {"subnet_constructor": subnet_constructor, "clamp": 1.0},
+        {**base_kwargs, "split_len": split_length},
+        {**base_kwargs, "split_len": split_length / channels},
+        base_kwargs,
     )
     errors: list[TypeError] = []
     for kwargs in candidates:
@@ -159,7 +159,12 @@ def _build_squeeze_layer(channels: int) -> SqueezeLayer:
     # FrEIA's `IRevNetUpsampling` is initialized from the downsampled shape
     # rather than the pre-squeeze shape. `SqueezeLayer.from_freia` hides that
     # version-specific constructor requirement for InvCompress.
-    for kwargs in ({"legacy_backend": False}, {}):
+    # `legacy_backend=True` reproduces upstream's
+    # `permute(0, 3, 5, 1, 2, 4)` channel ordering (`a1, a2, ..., b1, b2, ...`),
+    # which is required for the published InvCompress checkpoints; the
+    # FrEIA default (a strided-conv backend) interleaves channels differently
+    # and would invalidate the trained `InvertibleConv1x1` weights downstream.
+    for kwargs in ({"legacy_backend": True},):
         try:
             return SqueezeLayer.from_freia(dims_in, **kwargs)
         except TypeError as error:
@@ -381,7 +386,158 @@ class InvCompress(Cheng2020Anchor):
 
     @classmethod
     def from_state_dict(cls, state_dict: Dict[str, Tensor]) -> "InvCompress":
+        state_dict = convert_upstream_state_dict(state_dict)
         N = state_dict["h_a.0.weight"].size(0)
         net = cls(N=N)
         net.load_state_dict(state_dict)
         return net
+
+
+def _is_upstream_state_dict(state_dict: Dict[str, Tensor]) -> bool:
+    """Detect the upstream InvCompress key layout.
+
+    Upstream stores the invertible 1x1 convs as plain ``inv.operations.{i}.weight``
+    matrices and the coupling subnetworks as four parallel bottlenecks
+    (``G1`` / ``G2`` / ``H1`` / ``H2``). The compressai-side layout instead
+    routes them through the FrEIA ``Fixed1x1Conv`` and ``GLOWCouplingBlock``
+    backends (``inv.operations.{i}.backend.{M,M_inv,logDetM}`` and
+    ``inv.operations.{i}.backend.subnet{1,2}.conv{1,2,3}.{weight,bias}``).
+    """
+    for key in state_dict:
+        if key.startswith("inv.operations.") and ".G1.conv1.weight" in key:
+            return True
+    return False
+
+
+def convert_upstream_state_dict(
+    state_dict: Dict[str, Tensor],
+) -> Dict[str, Tensor]:
+    """Migrate an upstream InvCompress checkpoint to the compressai layout.
+
+    No-op for state dicts that already use the compressai naming.
+
+    The transform fuses the upstream ``G1`` / ``H1`` (resp. ``G2`` / ``H2``)
+    bottlenecks into a single FrEIA ``GLOWCouplingBlock`` subnet whose
+    output channels are ``[scale; translation]``. ``conv1`` is row-stacked,
+    ``conv2`` and ``conv3`` are placed on the block diagonal with zero
+    cross-coupling so the merged bottleneck is numerically identical to the
+    two parallel bottlenecks (block-diagonal weights + element-wise
+    LeakyReLU = no inter-half mixing).
+
+    The trainable upstream ``inv.operations.{i}.weight`` 1x1 conv is mapped
+    to the FrEIA ``Fixed1x1Conv`` buffers ``M`` / ``M_inv`` / ``logDetM``
+    (non-trainable in FrEIA 0.2; sufficient for inference-time use of the
+    published checkpoints).
+    """
+    if not _is_upstream_state_dict(state_dict):
+        return state_dict
+
+    converted: Dict[str, Tensor] = {}
+    inv_conv_weights: Dict[int, Tensor] = {}
+    coupling_buckets: Dict[int, Dict[str, Dict[str, Tensor]]] = {}
+
+    for key, value in state_dict.items():
+        if not key.startswith("inv.operations."):
+            converted[key] = value
+            continue
+
+        # `inv.operations.{idx}.{rest}` — `rest` distinguishes `weight`
+        # (1x1 conv) from `{G,H}{1,2}.conv{1,2,3}.{weight,bias}` (coupling).
+        _, _, op_idx_str, *rest = key.split(".")
+        op_idx = int(op_idx_str)
+
+        if rest == ["weight"]:
+            inv_conv_weights[op_idx] = value
+            continue
+
+        # Coupling subnet: rest is e.g. ["G1", "conv1", "weight"].
+        if len(rest) == 3 and rest[0] in {"G1", "G2", "H1", "H2"}:
+            sub_id, conv_name, param_name = rest
+            bucket = coupling_buckets.setdefault(op_idx, {})
+            sub_bucket = bucket.setdefault(sub_id, {})
+            sub_bucket[f"{conv_name}.{param_name}"] = value
+            continue
+
+        raise KeyError(f"Unhandled upstream InvCompress key: {key}")
+
+    for op_idx, weight in inv_conv_weights.items():
+        if weight.dim() != 2 or weight.shape[0] != weight.shape[1]:
+            raise ValueError(
+                f"inv.operations.{op_idx}.weight must be a square 2D matrix; "
+                f"got shape {tuple(weight.shape)}"
+            )
+        channels = weight.shape[0]
+        view = weight.view(channels, channels, 1, 1)
+        # Compute the inverse in float64 for numerical stability and cast back,
+        # mirroring upstream's `inverse(weight.double()).float()`.
+        weight_inv = (
+            torch.linalg.inv(weight.to(torch.float64)).to(weight.dtype)
+        ).view(channels, channels, 1, 1)
+        log_abs_det = torch.slogdet(weight.to(torch.float64))[1].to(weight.dtype)
+        prefix = f"inv.operations.{op_idx}.backend"
+        converted[f"{prefix}.M"] = view.contiguous()
+        converted[f"{prefix}.M_inv"] = weight_inv.contiguous()
+        converted[f"{prefix}.logDetM"] = log_abs_det
+
+    for op_idx, sub_buckets in coupling_buckets.items():
+        for from_subs, into_subnet in (
+            (("G1", "H1"), "subnet1"),
+            (("G2", "H2"), "subnet2"),
+        ):
+            scale_sub = sub_buckets[from_subs[0]]
+            shift_sub = sub_buckets[from_subs[1]]
+
+            scale_conv1_w = scale_sub["conv1.weight"]
+            shift_conv1_w = shift_sub["conv1.weight"]
+            scale_conv1_b = scale_sub["conv1.bias"]
+            shift_conv1_b = shift_sub["conv1.bias"]
+
+            scale_conv2_w = scale_sub["conv2.weight"]
+            shift_conv2_w = shift_sub["conv2.weight"]
+            scale_conv2_b = scale_sub["conv2.bias"]
+            shift_conv2_b = shift_sub["conv2.bias"]
+
+            scale_conv3_w = scale_sub["conv3.weight"]
+            shift_conv3_w = shift_sub["conv3.weight"]
+            scale_conv3_b = scale_sub["conv3.bias"]
+            shift_conv3_b = shift_sub["conv3.bias"]
+
+            # conv1: input is shared (split_len{1,2}), output is concat
+            # ``[scale_output, shift_output]`` which FrEIA splits into [s, t].
+            merged_conv1_w = torch.cat([scale_conv1_w, shift_conv1_w], dim=0)
+            merged_conv1_b = torch.cat([scale_conv1_b, shift_conv1_b], dim=0)
+
+            merged_conv2_w = _block_diagonal_conv(scale_conv2_w, shift_conv2_w)
+            merged_conv2_b = torch.cat([scale_conv2_b, shift_conv2_b], dim=0)
+
+            merged_conv3_w = _block_diagonal_conv(scale_conv3_w, shift_conv3_w)
+            merged_conv3_b = torch.cat([scale_conv3_b, shift_conv3_b], dim=0)
+
+            prefix = f"inv.operations.{op_idx}.backend.{into_subnet}"
+            converted[f"{prefix}.conv1.weight"] = merged_conv1_w.contiguous()
+            converted[f"{prefix}.conv1.bias"] = merged_conv1_b.contiguous()
+            converted[f"{prefix}.conv2.weight"] = merged_conv2_w.contiguous()
+            converted[f"{prefix}.conv2.bias"] = merged_conv2_b.contiguous()
+            converted[f"{prefix}.conv3.weight"] = merged_conv3_w.contiguous()
+            converted[f"{prefix}.conv3.bias"] = merged_conv3_b.contiguous()
+
+    return converted
+
+
+def _block_diagonal_conv(top_left: Tensor, bottom_right: Tensor) -> Tensor:
+    """Stack two ``[O, I, k, k]`` conv weights on the diagonal of a single
+    ``[2O, 2I, k, k]`` weight, with zero cross-block weights.
+
+    Used to merge upstream's parallel scale/shift bottlenecks into one FrEIA
+    subnet without coupling the two halves through the intermediate convs.
+    """
+    if top_left.shape != bottom_right.shape:
+        raise ValueError(
+            "block-diagonal merge requires identically shaped weights, got "
+            f"{tuple(top_left.shape)} vs {tuple(bottom_right.shape)}"
+        )
+    out_ch, in_ch, kh, kw = top_left.shape
+    merged = top_left.new_zeros(out_ch * 2, in_ch * 2, kh, kw)
+    merged[:out_ch, :in_ch] = top_left
+    merged[out_ch:, in_ch:] = bottom_right
+    return merged
