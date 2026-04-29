@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from typing import Dict, Optional, Sequence, Tuple
 
 import torch
@@ -34,6 +36,23 @@ from compressai.registry import register_model
 from .base import CompressionModel
 
 __all__ = ["MambaIC"]
+
+
+_LATENT_PREFIX_REWRITES = (
+    ("atten_mean.", "latent_codec.mean_support_transforms.", True),
+    ("atten_scale.", "latent_codec.scale_support_transforms.", True),
+    ("anchor_atten_mean.", "latent_codec.context_mean_transforms.", True),
+    ("anchor_atten_scale.", "latent_codec.context_scale_transforms.", True),
+    ("cc_mean_transforms.", "latent_codec.cc_mean_transforms.", False),
+    ("cc_scale_transforms.", "latent_codec.cc_scale_transforms.", False),
+    ("lrp_transforms.", "latent_codec.lrp_transforms.", False),
+    ("context_prediction.", "latent_codec.context_prediction.", False),
+    ("context_vss.", "latent_codec.context_vss.", False),
+    ("gaussian_conditional.", "latent_codec.gaussian_conditional.", False),
+)
+
+_UPSTREAM_CONTEXT_VSS_DUP = re.compile(r"^context_vss_\d+\.")
+_SEQUENCE_WRAPPER = re.compile(r"^(\d+)\.0\.(.*)$")
 
 
 def _infer_context_depths(
@@ -284,6 +303,7 @@ class MambaIC(CompressionModel):
 
     @classmethod
     def from_state_dict(cls, state_dict: Dict[str, Tensor]) -> "MambaIC":
+        state_dict = cls._migrate_state_dict(state_dict)
         depths = infer_vss_depths(state_dict)
         vss_kwargs = infer_vss_block_kwargs(state_dict)
         N = state_dict["g_a.0.weight"].size(0) // 2
@@ -329,5 +349,102 @@ class MambaIC(CompressionModel):
             context_attention_dim=context_attention_dim,
             **vss_kwargs,
         )
-        net.load_state_dict(state_dict)
+        incompatible = net.load_state_dict(state_dict, strict=False)
+        allowed_missing = {
+            key
+            for key in net.state_dict()
+            if key.endswith("relative_position_index")
+        }
+        missing = set(incompatible.missing_keys) - allowed_missing
+        if missing or incompatible.unexpected_keys:
+            raise RuntimeError(
+                "Unexpected incompatibility while loading MambaIC state_dict: "
+                f"missing={sorted(missing)}, "
+                f"unexpected={sorted(incompatible.unexpected_keys)}"
+            )
         return net
+
+    @classmethod
+    def _migrate_state_dict(cls, state_dict: Dict[str, Tensor]) -> Dict[str, Tensor]:
+        """Translate the upstream MambaIC checkpoint layout into the
+        compressai layout used by :class:`MambaIC`. Keys already in
+        compressai layout pass through unchanged, so calling this on a
+        round-tripped ``state_dict`` is a safe no-op.
+
+        Handled differences vs. upstream `MambaIC.py`:
+
+        * Top-level latent-codec submodules (``atten_mean``, ``atten_scale``,
+          ``anchor_atten_mean``, ``anchor_atten_scale``, ``cc_*``,
+          ``lrp_transforms``, ``context_prediction``, ``context_vss``,
+          ``gaussian_conditional``) move under ``latent_codec.``.
+        * The ``nn.Sequential(SWAtten(...))`` wrapper around ``atten_*`` and
+          ``anchor_atten_*`` adds an extra ``.0.`` segment that we strip.
+        * Upstream stores the same five context VSS stages twice — once as
+          ``context_vss.{i}.*`` (via the ModuleList) and once as
+          ``context_vss_{i+1}.*`` (via separate attributes). We drop the
+          duplicates.
+        * Inside SWAtten's WMSA we swap upstream's ``embedding_layer`` /
+          ``linear`` / ``relative_position_params`` for compressai's
+          ``attn.qkv`` / ``output_proj`` / ``attn.relative_position_bias_table``
+          (with the table permuted from ``(heads, 2W-1, 2W-1)`` to
+          ``((2W-1)^2, heads)``), and synthesise an identity ``attn.proj``
+          since upstream folds it into ``linear``.
+        * ``Block`` LayerNorms and MLP projections (``ln1`` / ``ln2`` /
+          ``mlp.0`` / ``mlp.2``) are renamed to compressai's
+          ``norm1`` / ``norm2`` / ``mlp.fc1`` / ``mlp.fc2``.
+        """
+        migrated: Dict[str, Tensor] = {}
+        for key, value in state_dict.items():
+            if _UPSTREAM_CONTEXT_VSS_DUP.match(key):
+                continue
+            new_key = key
+            for old_prefix, new_prefix, drop_seq_wrapper in _LATENT_PREFIX_REWRITES:
+                if new_key.startswith(old_prefix):
+                    tail = new_key[len(old_prefix):]
+                    if drop_seq_wrapper:
+                        match = _SEQUENCE_WRAPPER.match(tail)
+                        if match:
+                            tail = f"{match.group(1)}.{match.group(2)}"
+                    new_key = new_prefix + tail
+                    break
+
+            if ".msa.relative_position_params" in new_key:
+                new_key = new_key.replace(
+                    ".msa.relative_position_params",
+                    ".msa.attn.relative_position_bias_table",
+                )
+                value = value.permute(1, 2, 0).reshape(-1, value.size(0)).contiguous()
+            elif ".msa.embedding_layer." in new_key:
+                new_key = new_key.replace(".msa.embedding_layer.", ".msa.attn.qkv.")
+            elif ".msa.linear." in new_key:
+                new_key = new_key.replace(".msa.linear.", ".msa.output_proj.")
+                cls._ensure_identity_attention_projection(migrated, new_key, value)
+
+            new_key = new_key.replace(".ln1.", ".norm1.")
+            new_key = new_key.replace(".ln2.", ".norm2.")
+            new_key = new_key.replace(".mlp.0.", ".mlp.fc1.")
+            new_key = new_key.replace(".mlp.2.", ".mlp.fc2.")
+
+            migrated[new_key] = value
+        return migrated
+
+    @staticmethod
+    def _ensure_identity_attention_projection(
+        state_dict: Dict[str, Tensor],
+        output_proj_key: str,
+        output_proj_value: Tensor,
+    ) -> None:
+        prefix, suffix = output_proj_key.rsplit(".msa.output_proj.", 1)
+        attn_proj_key = f"{prefix}.msa.attn.proj.{suffix}"
+        if attn_proj_key in state_dict:
+            return
+        if suffix == "weight":
+            dimension = output_proj_value.size(0)
+            state_dict[attn_proj_key] = torch.eye(
+                dimension,
+                dtype=output_proj_value.dtype,
+                device=output_proj_value.device,
+            )
+            return
+        if suffix == "bias":
+            state_dict[attn_proj_key] = torch.zeros_like(output_proj_value)
