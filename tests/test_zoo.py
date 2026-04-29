@@ -47,7 +47,9 @@ from compressai.models import (
     MeanScaleHyperprior,
     SAAF,
     ScaleHyperprior,
+    ShiftLIC,
     TCM,
+    TinyLIC,
     WeConvene,
 )
 from compressai.zoo import (
@@ -72,7 +74,11 @@ from compressai.zoo import (
     mbt2018,
     mbt2018_mean,
     saaf,
+    shiftlic_large,
+    shiftlic_middle,
+    shiftlic_small,
     tcm,
+    tinylic,
     weconvene,
 )
 from compressai.zoo.image import _load_model
@@ -347,6 +353,31 @@ class TestCandidateModels:
 
         with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
             mambavc(pretrained=True)
+
+    def test_tinylic(self):
+        net = tinylic(N=128, M=320)
+
+        assert isinstance(net, TinyLIC)
+        assert candidate_model_architectures["tinylic"] is TinyLIC
+
+        with pytest.raises(RuntimeError, match="Pre-trained TinyLIC weights"):
+            tinylic(pretrained=True)
+
+    @pytest.mark.parametrize(
+        "factory,variant",
+        [
+            (shiftlic_small, "small"),
+            (shiftlic_middle, "middle"),
+            (shiftlic_large, "large"),
+        ],
+    )
+    def test_shiftlic(self, factory, variant):
+        net = factory(N=192, M=320)
+        assert isinstance(net, ShiftLIC)
+        assert net.variant == variant
+        assert candidate_model_architectures[f"shiftlic-{variant}"] is ShiftLIC
+        with pytest.raises(RuntimeError, match="not yet"):
+            factory(pretrained=True)
 
     def test_hpcm(self):
         common_kwargs = dict(

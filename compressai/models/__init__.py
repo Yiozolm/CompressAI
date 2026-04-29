@@ -42,8 +42,10 @@ from .mlicpp import *
 from .pointcloud import *
 from .saaf import *
 from .sensetime import *
+from .shiftlic import *
 from .stf import *
 from .tcm import *
+from .tinylic import *
 from .vbr import *
 from .waseda import *
 from .weconvene import *

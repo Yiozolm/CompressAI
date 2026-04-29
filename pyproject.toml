@@ -95,6 +95,9 @@ mamba = [
 ftic = [
   "range-coder",
 ]
+tinylic = [
+  "natten; platform_system == 'Linux'",
+]
 
 # NOTE: Temporarily duplicated from [project.optional-dependencies] until
 # pip supports installing [dependency-groups].
@@ -138,6 +141,9 @@ mamba = [
 ]
 ftic = [
   "range-coder",
+]
+tinylic = [
+  "natten; platform_system == 'Linux'",
 ]
 
 [tool.setuptools]

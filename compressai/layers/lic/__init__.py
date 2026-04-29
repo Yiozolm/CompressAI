@@ -43,6 +43,14 @@ from .saaf import (
     SpatialAttentionBlock,
     SpatialAttentionLayer,
 )
+from .shift import (
+    CheapCS1,
+    CheapChannelV1,
+    ResidualBlockShift,
+    ResidualShiftStack,
+    Shift4,
+    channel_shuffle,
+)
 from .mlic import (
     AnalysisTransform,
     ChannelContext,
@@ -129,6 +137,9 @@ __all__ = [
     "build_freia_coupling_layer",
     "build_freia_invertible_conv",
     "build_freia_squeeze_pair",
+    "channel_shuffle",
+    "CheapCS1",
+    "CheapChannelV1",
     "CouplingLayer",
     "ConvPositionalEncoding",
     "EntropyParameters",
@@ -139,6 +150,9 @@ __all__ = [
     "FTICSynthesisTransform",
     "is_freia_available",
     "MaskedSliceChannelAttention",
+    "ResidualBlockShift",
+    "ResidualShiftStack",
+    "Shift4",
     "SwinFDWA",
     "TCA",
     "TCABlock",

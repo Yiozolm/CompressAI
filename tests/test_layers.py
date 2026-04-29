@@ -34,14 +34,25 @@ from compressai.layers import (
     GDN,
     GDN1,
     AttentionBlock,
+    CheapCS1,
     MaskedConv2d,
+    MultistageMaskedConv2d,
     QReLU,
     GatedTransformCNN,
     LayerNorm2d,
     ResidualBlock,
+    ResidualBlockShift,
     ResidualBottleneckBlock,
     ResidualBlockUpsample,
     ResidualBlockWithStride,
+    ResidualShiftStack,
+    Shift4,
+)
+from compressai.ops import (
+    demultiplex,
+    demultiplex_v2,
+    multiplex,
+    multiplex_v2,
 )
 
 
@@ -230,6 +241,119 @@ def test_GatedTransformCNN():
 def test_AttentionBlock():
     layer = AttentionBlock(8)
     layer(torch.rand(1, 8, 4, 4))
+
+
+class TestMultistageMaskedConv2d:
+    @staticmethod
+    def test_invalid_mask_type():
+        with pytest.raises(ValueError):
+            MultistageMaskedConv2d(1, 1, 3, mask_type="Z")
+
+    @staticmethod
+    def test_mask_A():
+        # 3x3, keeps only (even, even).
+        conv = MultistageMaskedConv2d(1, 1, 3, mask_type="A")
+        expected = torch.zeros_like(conv.mask)
+        expected[:, :, 0::2, 0::2] = 1
+        assert (conv.mask == expected).all()
+
+    @staticmethod
+    def test_mask_B():
+        # 5x5, keeps the two anti-diagonal halves.
+        conv = MultistageMaskedConv2d(1, 1, 5, padding=2, mask_type="B")
+        expected = torch.zeros_like(conv.mask)
+        expected[:, :, 0::2, 1::2] = 1
+        expected[:, :, 1::2, 0::2] = 1
+        assert (conv.mask == expected).all()
+
+    @staticmethod
+    def test_mask_C():
+        # 5x5, keeps (even, odd) + all odd rows.
+        conv = MultistageMaskedConv2d(1, 1, 5, padding=2, mask_type="C")
+        expected = torch.zeros_like(conv.mask)
+        expected[:, :, 0::2, 1::2] = 1
+        expected[:, :, 1::2, :] = 1
+        assert (conv.mask == expected).all()
+
+    @staticmethod
+    def test_forward_zeroes_masked_positions():
+        conv = MultistageMaskedConv2d(2, 2, 3, padding=1, mask_type="A")
+        torch.nn.init.normal_(conv.weight)
+        _ = conv(torch.randn(1, 2, 4, 4))
+        # Mask-A keeps only (even, even); other positions must be zero.
+        assert (conv.weight[:, :, 0, 1] == 0).all()
+        assert (conv.weight[:, :, 1, :] == 0).all()
+
+
+class TestMultiplex:
+    @staticmethod
+    def test_demultiplex_round_trip():
+        x = torch.randn(2, 8, 4, 6)
+        anchor, non_anchor = demultiplex(x)
+        # space2depth r=2 expands C 8→32; then split into 16 + 16.
+        assert anchor.shape == (2, 16, 2, 3)
+        assert non_anchor.shape == (2, 16, 2, 3)
+        x_round = multiplex(anchor, non_anchor)
+        assert x_round.shape == x.shape
+        assert torch.equal(x_round, x)
+
+    @staticmethod
+    def test_demultiplex_v2_round_trip():
+        x = torch.randn(2, 8, 4, 6)
+        y1, y2, y3, y4 = demultiplex_v2(x)
+        # 4-way split of the 32-channel space2depth result: each is C/4 = 8.
+        for y in (y1, y2, y3, y4):
+            assert y.shape == (2, 8, 2, 3)
+        x_round = multiplex_v2(y1, y2, y3, y4)
+        assert x_round.shape == x.shape
+        assert torch.equal(x_round, x)
+
+
+class TestShift:
+    @staticmethod
+    def test_shift4_directions():
+        # 4 channels, 4 groups of 1 channel each. Each group shifts in one
+        # direction by stride=1; verify a single "1" at center moves into
+        # the correct neighbor cell for each group.
+        layer = Shift4(groups=1, stride=1, mode="constant")
+        x = torch.zeros(1, 4, 5, 5)
+        x[:, :, 2, 2] = 1.0
+        y = layer(x)
+        # Group 0: the 1 originally at (2,2) appears at (3,2) (down-shift).
+        assert y[0, 0, 3, 2].item() == 1.0
+        # Group 1: appears at (1,2) (up-shift).
+        assert y[0, 1, 1, 2].item() == 1.0
+        # Group 2: appears at (2,3) (right-shift).
+        assert y[0, 2, 2, 3].item() == 1.0
+        # Group 3: appears at (2,1) (left-shift).
+        assert y[0, 3, 2, 1].item() == 1.0
+        assert y.sum().item() == 4.0
+
+    @staticmethod
+    def test_residual_block_shift_forward():
+        layer = ResidualBlockShift(8, 8)
+        out = layer(torch.randn(2, 8, 6, 6))
+        assert out.shape == (2, 8, 6, 6)
+        layer = ResidualBlockShift(8, 16)
+        out = layer(torch.randn(2, 8, 6, 6))
+        assert out.shape == (2, 16, 6, 6)
+
+    @staticmethod
+    def test_residual_shift_stack_shape():
+        layer = ResidualShiftStack(in_ch=128, out_ch=64)
+        out = layer(torch.randn(1, 128, 8, 8))
+        assert out.shape == (1, 64, 8, 8)
+
+    @staticmethod
+    def test_residual_shift_stack_odd_out_ch_rejected():
+        with pytest.raises(ValueError, match="even"):
+            ResidualShiftStack(in_ch=8, out_ch=7)
+
+    @staticmethod
+    def test_cheap_cs1_forward():
+        layer = CheapCS1(dim=64)
+        out = layer(torch.randn(1, 64, 16, 16))
+        assert out.shape == (1, 64, 16, 16)
 
 
 class TestQReLU:

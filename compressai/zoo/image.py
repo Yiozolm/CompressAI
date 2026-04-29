@@ -49,8 +49,10 @@ from compressai.models import (
     MeanScaleHyperprior,
     SAAF,
     ScaleHyperprior,
+    ShiftLIC,
     SymmetricalTransFormer,
     TCM,
+    TinyLIC,
     WeConvene,
     WACNN,
 )
@@ -75,9 +77,13 @@ __all__ = [
     "mambavc",
     "mlicpp",
     "saaf",
+    "shiftlic_small",
+    "shiftlic_middle",
+    "shiftlic_large",
     "stf",
     "stf_wacnn",
     "tcm",
+    "tinylic",
     "weconvene",
     "mbt2018",
     "mbt2018_mean",
@@ -117,6 +123,10 @@ candidate_model_architectures = {
     "cca": CCAModel,
     "mambaic": MambaIC,
     "mambavc": MambaVC,
+    "tinylic": TinyLIC,
+    "shiftlic-small": ShiftLIC,
+    "shiftlic-middle": ShiftLIC,
+    "shiftlic-large": ShiftLIC,
 }
 
 root_url = "https://compressai.s3.amazonaws.com/models/v1"
@@ -461,6 +471,51 @@ def mambavc(pretrained: bool = False, progress: bool = True, **kwargs):
     if pretrained:
         raise RuntimeError("Pre-trained model not yet available")
     return MambaVC(**kwargs)
+
+
+def tinylic(pretrained: bool = False, progress: bool = True, **kwargs):
+    """TinyLIC — NAT-based learned image compression (Lu & Ma, 2022).
+
+    Pre-trained checkpoints are hosted on the upstream NJU Box (Q1–Q8); not
+    mirrored here. Download them from the upstream repo and load via::
+
+        state_dict = torch.load(path, map_location='cpu')['state_dict']
+        # If the checkpoint was saved with DataParallel, strip `module.`:
+        # state_dict = {k.partition('module.')[2] or k: v for k, v in
+        #               state_dict.items()}
+        model = TinyLIC.from_state_dict(state_dict)
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError(
+            "Pre-trained TinyLIC weights are not mirrored. See the upstream "
+            "repository for NJU Box download links."
+        )
+    return TinyLIC(**kwargs)
+
+
+def _shiftlic_factory(variant: str):
+    def _factory(pretrained: bool = False, progress: bool = True, **kwargs):
+        del progress
+        if pretrained:
+            raise RuntimeError(
+                f"Pre-trained ShiftLIC ({variant}) weights are not yet "
+                "available upstream."
+            )
+        kwargs.pop("variant", None)
+        return ShiftLIC(variant=variant, **kwargs)
+
+    _factory.__name__ = f"shiftlic_{variant}"
+    _factory.__doc__ = (
+        f"ShiftLIC ({variant}) — Bao et al., TCSVT 2025 "
+        "(`arXiv:2503.23052 <https://arxiv.org/abs/2503.23052>`_)."
+    )
+    return _factory
+
+
+shiftlic_small = _shiftlic_factory("small")
+shiftlic_middle = _shiftlic_factory("middle")
+shiftlic_large = _shiftlic_factory("large")
 
 
 def mlicpp(pretrained: bool = False, progress: bool = True, **kwargs):

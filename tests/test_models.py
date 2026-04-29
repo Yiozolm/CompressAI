@@ -50,7 +50,9 @@ from compressai.models import (
     MambaVC,
     MLICPlusPlus,
     SAAF,
+    ShiftLIC,
     TCM,
+    TinyLIC,
     WACNN,
     WeConvene,
 )
@@ -911,6 +913,88 @@ class TestModels:
         with torch.no_grad():
             out_no_aux = infer(x)
         assert out_no_aux["aux_likelihoods"] is None
+
+    def test_tinylic(self):
+        # Default config (N=128, M=320). Use 256x256 — the upstream training
+        # / inference size. Eval + no_grad keeps memory bounded.
+        model = TinyLIC(N=128, M=320)
+        model.eval()
+        x = torch.rand(1, 3, 256, 256)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert "x_hat" in out
+        assert "likelihoods" in out
+        assert "y" in out["likelihoods"]
+        assert "z" in out["likelihoods"]
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 320, 16, 16)
+        assert out["likelihoods"]["z"].shape == (1, 192, 4, 4)
+
+        # state_dict roundtrip via from_state_dict (compressai layout).
+        loaded = TinyLIC.from_state_dict(model.state_dict())
+        assert loaded.N == 128
+        assert loaded.M == 320
+
+        # Upstream-style state_dict (entropy keys at top level) must also load
+        # via the load_state_dict pre-pass remap.
+        upstream_sd = {}
+        for k, v in model.state_dict().items():
+            if k.startswith("latent_codec."):
+                upstream_sd[k[len("latent_codec.") :]] = v
+            else:
+                upstream_sd[k] = v
+        loaded_upstream = TinyLIC.from_state_dict(upstream_sd)
+        assert loaded_upstream.N == 128
+        assert loaded_upstream.M == 320
+        for k, v in model.state_dict().items():
+            assert torch.equal(v, loaded_upstream.state_dict()[k]), k
+
+        # Bitstream roundtrip.
+        model.update(force=True)
+        with torch.no_grad():
+            compressed = model.compress(x)
+            decoded = model.decompress(compressed["strings"], compressed["shape"])
+
+        assert len(compressed["strings"]) == 2
+        assert len(compressed["strings"][0]) == 1  # one packed y bytestring
+        assert len(compressed["strings"][1]) == x.size(0)  # per-sample z
+        assert decoded["x_hat"].shape == x.shape
+
+    @pytest.mark.parametrize("variant", ["small", "middle", "large"])
+    def test_shiftlic(self, variant):
+        # All three variants share the encoder/hyper structure (N=192, M=320);
+        # large additionally exercises the staged latent codec branch.
+        model = ShiftLIC(variant=variant, N=192, M=320)
+        model.eval()
+        x = torch.rand(1, 3, 256, 256)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 320, 16, 16)
+        assert out["likelihoods"]["z"].shape == (1, 192, 4, 4)
+
+        # state_dict roundtrip via from_state_dict (variant inferred).
+        loaded = ShiftLIC.from_state_dict(model.state_dict())
+        assert loaded.variant == variant
+        assert loaded.N == 192 and loaded.M == 320
+
+        # Upstream-style state_dict (codec keys at top level) only matters
+        # for ``large``; small/middle don't use the codec.
+        if variant == "large":
+            upstream_sd = {}
+            for k, v in model.state_dict().items():
+                if k.startswith("latent_codec."):
+                    upstream_sd[k[len("latent_codec.") :]] = v
+                else:
+                    upstream_sd[k] = v
+            loaded_upstream = ShiftLIC.from_state_dict(upstream_sd)
+            assert loaded_upstream.variant == "large"
+            for k, v in model.state_dict().items():
+                assert torch.equal(v, loaded_upstream.state_dict()[k]), k
 
     def test_invcompress_missing_dependency(self):
         if is_freia_available():

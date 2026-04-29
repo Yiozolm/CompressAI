@@ -39,6 +39,7 @@ from .hyper import HyperLatentCodec
 from .hyperprior import HyperpriorLatentCodec
 from .mambaic import MambaICLatentCodec
 from .mlicpp import MLICPlusPlusLatentCodec
+from .multistage_checkerboard import MultistageCheckerboardLatentCodec
 from .rasterscan import RasterScanLatentCodec
 from .weconvene import WeChARMLatentCodec
 
@@ -56,6 +57,7 @@ __all__ = [
     "HyperpriorLatentCodec",
     "MambaICLatentCodec",
     "MLICPlusPlusLatentCodec",
+    "MultistageCheckerboardLatentCodec",
     "RasterScanLatentCodec",
     "WeChARMLatentCodec",
 ]

@@ -43,6 +43,7 @@ __all__ = [
     "AttentionBlock",
     "MaskedConv2d",
     "CheckerboardMaskedConv2d",
+    "MultistageMaskedConv2d",
     "ResidualBlock",
     "ResidualBlockUpsample",
     "ResidualBlockWithStride",
@@ -170,6 +171,41 @@ class CheckerboardMaskedConv2d(MaskedConv2d):
         self.mask[:, :, 0::2, 0::2] = 0
         self.mask[:, :, 1::2, 1::2] = 0
         self.mask[:, :, h // 2, w // 2] = mask_type == "B"
+
+
+class MultistageMaskedConv2d(nn.Conv2d):
+    r"""Multi-stage masked 2D convolution used by TinyLIC's staged
+    checkerboard context model.
+
+    Three mask types covering the four-pass schedule of one slice:
+
+    - ``'A'`` (3×3): keeps only ``(even, even)`` positions — used to feed the
+      first decoded subset back into the next stage.
+    - ``'B'`` (5×5): keeps the two anti-diagonal halves
+      (``(even, odd)`` + ``(odd, even)``).
+    - ``'C'`` (5×5): keeps the upper anti-diagonal half plus all odd rows
+      (``(even, odd)`` + ``(odd, *)``).
+    """
+
+    def __init__(self, *args: Any, mask_type: str = "A", **kwargs: Any):
+        super().__init__(*args, **kwargs)
+
+        self.register_buffer("mask", torch.zeros_like(self.weight.data))
+
+        if mask_type == "A":
+            self.mask[:, :, 0::2, 0::2] = 1
+        elif mask_type == "B":
+            self.mask[:, :, 0::2, 1::2] = 1
+            self.mask[:, :, 1::2, 0::2] = 1
+        elif mask_type == "C":
+            self.mask[:, :, 0::2, 1::2] = 1
+            self.mask[:, :, 1::2, :] = 1
+        else:
+            raise ValueError(f'Invalid "mask_type" value "{mask_type}"')
+
+    def forward(self, x: Tensor) -> Tensor:
+        self.weight.data = self.weight.data * self.mask
+        return super().forward(x)
 
 
 def conv3x3(in_ch: int, out_ch: int, stride: int = 1) -> nn.Module:
