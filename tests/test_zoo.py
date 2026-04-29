@@ -39,6 +39,7 @@ from compressai.models import (
     FactorizedPrior,
     FrequencyAwareTransFormer,
     HPCM,
+    Informer,
     InvCompress,
     JointAutoregressiveHierarchicalPriors,
     MambaIC,
@@ -68,6 +69,7 @@ from compressai.zoo import (
     hpcm_base,
     hpcm_large,
     hpcm_phi,
+    informer,
     invcompress,
     mambaic,
     mambavc,
@@ -373,6 +375,15 @@ class TestCandidateModels:
 
         with pytest.raises(RuntimeError, match="not yet available"):
             tic(pretrained=True)
+
+    def test_informer(self):
+        net = informer(N=64, M=64, num_global=4)
+
+        assert isinstance(net, Informer)
+        assert candidate_model_architectures["informer"] is Informer
+
+        with pytest.raises(RuntimeError, match="not yet available"):
+            informer(pretrained=True)
 
     @pytest.mark.parametrize(
         "factory,variant",

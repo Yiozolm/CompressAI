@@ -45,6 +45,7 @@ from compressai.models import (
     DCAE,
     FrequencyAwareTransFormer,
     HPCM,
+    Informer,
     InvCompress,
     MambaIC,
     MambaVC,
@@ -1134,6 +1135,42 @@ class TestModels:
         with torch.no_grad():
             out_loaded = loaded(x)
         assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+
+    def test_informer(self):
+        # Default config (N=192, M=192, num_global=8). 256x256 → y is 16x16.
+        model = Informer(N=192, M=192, num_global=8)
+        model.eval()
+        x = torch.rand(1, 3, 256, 256)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert "x_hat" in out
+        assert "likelihoods" in out
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 192, 16, 16)
+        assert out["likelihoods"]["l_z"].shape == (1, 12, 16, 16)
+        assert out["likelihoods"]["g_z"].shape == (1, 192, 1, 1)
+
+        # state_dict roundtrip via from_state_dict (N/M/num_global inferred).
+        loaded = Informer.from_state_dict(model.state_dict())
+        assert loaded.N == 192
+        assert loaded.M == 192
+        assert loaded.num_global == 8
+
+        # Smaller config to keep the autoregressive bitstream roundtrip fast.
+        small = Informer(N=64, M=64, num_global=4)
+        small.eval()
+        small.update(force=True)
+        xs = torch.rand(1, 3, 128, 128)
+        with torch.no_grad():
+            compressed = small.compress(xs)
+            decoded = small.decompress(compressed["strings"], compressed["shape"])
+        assert len(compressed["strings"]) == 3  # y, local_z, global_z
+        assert len(compressed["strings"][0]) == xs.size(0)
+        assert len(compressed["strings"][1]) == xs.size(0)
+        assert len(compressed["strings"][2]) == xs.size(0)
+        assert decoded["x_hat"].shape == xs.shape
 
 
 def test_scale_table_default():

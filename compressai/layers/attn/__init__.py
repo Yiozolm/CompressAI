@@ -1,4 +1,5 @@
 from .cam import CausalAttentionModule
+from .cross import CrossAttention, CrossAttentionBlock
 from .cross_window import WindowedCrossAttention
 from .inference import (
     infer_swatten_attention_dim,
@@ -42,6 +43,8 @@ __all__ = [
     "Block",
     "CausalAttentionModule",
     "ConvTransBlock",
+    "CrossAttention",
+    "CrossAttentionBlock",
     "Mlp",
     "NSABlock",
     "PatchEmbed1D",

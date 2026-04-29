@@ -35,6 +35,7 @@ from .ftic import *
 from .glic import *
 from .google import *
 from .hpcm import *
+from .informer import *
 from .invcompress import *
 from .mambaic import *
 from .mambavc import *

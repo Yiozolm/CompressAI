@@ -41,6 +41,7 @@ from compressai.models import (
     FrequencyAwareTransFormer,
     GLIC,
     HPCM,
+    Informer,
     InvCompress,
     MambaIC,
     MambaVC,
@@ -73,6 +74,7 @@ __all__ = [
     "hpcm_base",
     "hpcm_large",
     "hpcm_phi",
+    "informer",
     "invcompress",
     "mambaic",
     "mambavc",
@@ -121,6 +123,7 @@ candidate_model_architectures = {
     "hpcm-base": HPCM,
     "hpcm-large": HPCM,
     "hpcm-phi": HPCM,
+    "informer": Informer,
     "invcompress": InvCompress if is_freia_available() else None,
     "cca": CCAModel,
     "mambaic": MambaIC,
@@ -460,6 +463,19 @@ def invcompress(pretrained: bool = False, progress: bool = True, **kwargs):
             "Install `compressai[invcompress]` to enable this model."
         )
     return InvCompress(**kwargs)
+
+
+def informer(pretrained: bool = False, progress: bool = True, **kwargs):
+    """Informer — Joint Global and Local Hierarchical Priors (Kim et al., CVPR 2022).
+
+    Combines a vanilla 4-stage Conv+GDN encoder/decoder with a local 1×1-conv
+    hyperprior and a global cross-attention hyperprior over ``num_global``
+    learnable tokens. Pre-trained weights are not mirrored.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return Informer(**kwargs)
 
 
 def mambaic(pretrained: bool = False, progress: bool = True, **kwargs):
