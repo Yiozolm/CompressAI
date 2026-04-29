@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -46,6 +48,8 @@ _LEGACY_LATENT_PREFIX_MAP = {
     "cc_scale_transforms.": "latent_codec.cc_scale_transforms.",
     "lrp_transforms.": "latent_codec.lrp_transforms.",
 }
+
+_UPSTREAM_SWATTEN_WRAPPER = re.compile(r"^(atten_mean|atten_scale)\.(\d+)\.0\.")
 
 
 def _group_consecutive(indices: Iterable[int]) -> List[List[int]]:
@@ -619,6 +623,11 @@ class TCM(CompressionModel):
         migrated: Dict[str, Tensor] = {}
         for key, value in state_dict.items():
             new_key = key
+            wrapper = _UPSTREAM_SWATTEN_WRAPPER.match(new_key)
+            if wrapper:
+                new_key = (
+                    f"{wrapper.group(1)}.{wrapper.group(2)}." + new_key[wrapper.end():]
+                )
             for legacy_prefix, target_prefix in _LEGACY_LATENT_PREFIX_MAP.items():
                 if new_key.startswith(legacy_prefix):
                     new_key = f"{target_prefix}{new_key.removeprefix(legacy_prefix)}"
