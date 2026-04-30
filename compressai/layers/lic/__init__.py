@@ -78,13 +78,6 @@ from .mlic import (
     LocalContext,
     SynthesisTransform,
 )
-from .cmic import (
-    CMICAnalysisTransform,
-    CMICChannelContextBlock,
-    CMICSpatialContextBlock,
-    CMICStage,
-    CMICSynthesisTransform,
-)
 
 __all__ = [
     "AnalysisTransform",
@@ -134,11 +127,6 @@ __all__ = [
     "SwinBlockWithConvMulti",
     "SynthesisTransform",
     "ChannelContext",
-    "CMICAnalysisTransform",
-    "CMICChannelContextBlock",
-    "CMICSpatialContextBlock",
-    "CMICStage",
-    "CMICSynthesisTransform",
     "build_freia_coupling_layer",
     "build_freia_invertible_conv",
     "build_freia_squeeze_pair",
