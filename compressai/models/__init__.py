@@ -31,6 +31,7 @@ from .base import *
 from .cca import *
 from .cmic import *
 from .dcae import *
+from .entroformer import *
 from .ftic import *
 from .gained import *
 from .glic import *
@@ -42,6 +43,7 @@ from .mambaic import *
 from .mambavc import *
 from .mlicpp import *
 from .pointcloud import *
+from .qian2021ref import *
 from .saaf import *
 from .sensetime import *
 from .shiftlic import *

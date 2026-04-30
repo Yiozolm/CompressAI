@@ -41,6 +41,8 @@ from .mambaic import MambaICLatentCodec
 from .mlicpp import MLICPlusPlusLatentCodec
 from .multistage_checkerboard import MultistageCheckerboardLatentCodec
 from .rasterscan import RasterScanLatentCodec
+from .ref_autoregressive import RefAutoregressiveLatentCodec
+from .transformer_ar import TransformerARLatentCodec
 from .weconvene import WeChARMLatentCodec
 
 __all__ = [
@@ -59,5 +61,7 @@ __all__ = [
     "MLICPlusPlusLatentCodec",
     "MultistageCheckerboardLatentCodec",
     "RasterScanLatentCodec",
+    "RefAutoregressiveLatentCodec",
+    "TransformerARLatentCodec",
     "WeChARMLatentCodec",
 ]

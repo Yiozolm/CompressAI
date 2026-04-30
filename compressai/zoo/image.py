@@ -36,6 +36,7 @@ from compressai.models import (
     Cheng2020Anchor,
     Cheng2020Attention,
     DCAE,
+    Entroformer,
     FactorizedPrior,
     FactorizedPriorReLU,
     FrequencyAwareTransFormer,
@@ -50,6 +51,7 @@ from compressai.models import (
     JointAutoregressiveHierarchicalPriors,
     MLICPlusPlus,
     MeanScaleHyperprior,
+    RefBasedAR,
     SAAF,
     SCGainedMSHyperprior,
     ScaleHyperprior,
@@ -72,6 +74,7 @@ __all__ = [
     "cca",
     "cmic",
     "dcae",
+    "entroformer",
     "ftic",
     "glic",
     "hpcm",
@@ -83,6 +86,7 @@ __all__ = [
     "mambaic",
     "mambavc",
     "mlicpp",
+    "qian2021_ref",
     "saaf",
     "shiftlic_small",
     "shiftlic_middle",
@@ -117,11 +121,13 @@ candidate_model_architectures = {
     "glic": GLIC,
     "cmic": CMIC if is_pytorch_wavelets_available() else None,
     "mlicpp": MLICPlusPlus,
+    "qian2021-ref": RefBasedAR,
     "stf-wacnn": WACNN,
     "stf": SymmetricalTransFormer,
     "lic-tcm": TCM,
     "tcm": TCM,
     "dcae": DCAE,
+    "entroformer": Entroformer,
     "saaf": SAAF,
     "weconvene": WeConvene if is_pytorch_wavelets_available() else None,
     "ftic": FrequencyAwareTransFormer,
@@ -485,6 +491,41 @@ def informer(pretrained: bool = False, progress: bool = True, **kwargs):
     if pretrained:
         raise RuntimeError("Pre-trained model not yet available")
     return Informer(**kwargs)
+
+
+def entroformer(pretrained: bool = False, progress: bool = True, **kwargs):
+    """Entroformer — Transformer-based entropy model (Qian et al., ICLR 2022).
+
+    Ballé-style 4-stage Conv+GDN auto-encoder with a Transformer hyperprior
+    (3-stage ``cit_he`` / ``cit_hd``) and a causal Transformer auto-regressive
+    entropy model (``cit_ar``). Latent likelihood uses a single Gaussian
+    (``num_parameter=2``, ``K=1``); the hyperprior uses
+    :class:`compressai.entropy_models.LearnedGaussianBottleneck`. Pre-trained
+    weights are not mirrored — use ``examples/convert_entroformer_checkpoint.py``
+    to convert the official ``entroformer_lambda*.pth`` checkpoints.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return Entroformer(**kwargs)
+
+
+def qian2021_ref(pretrained: bool = False, progress: bool = True, **kwargs):
+    """Reference-Based AR — Global reference + local context entropy model
+    (Qian et al., ICLR 2021).
+
+    Ballé-style 4-stage Conv+GSDN auto-encoder with a 3-conv hyperprior and
+    a 3-cascade auto-regressive entropy model that combines a 5×5 masked-conv
+    local context, a global reference search and a hyperprior-derived feature
+    into a discretised K=3 Gaussian mixture. The hyperprior uses
+    :class:`compressai.entropy_models.LearnedGaussianBottleneck`. Pre-trained
+    weights are not mirrored — use ``examples/convert_qian2021ref_checkpoint.py``
+    to convert the official ``model_mse*.pth`` checkpoints.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return RefBasedAR(**kwargs)
 
 
 def mambaic(pretrained: bool = False, progress: bool = True, **kwargs):

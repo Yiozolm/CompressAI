@@ -43,6 +43,7 @@ from compressai.models import (
     CCAModel,
     CMIC,
     DCAE,
+    Entroformer,
     FrequencyAwareTransFormer,
     GainedMSHyperprior,
     GainedScaleHyperprior,
@@ -52,6 +53,7 @@ from compressai.models import (
     MambaIC,
     MambaVC,
     MLICPlusPlus,
+    RefBasedAR,
     SAAF,
     SCGainedMSHyperprior,
     ShiftLIC,
@@ -1174,6 +1176,99 @@ class TestModels:
         assert len(compressed["strings"][1]) == xs.size(0)
         assert len(compressed["strings"][2]) == xs.size(0)
         assert decoded["x_hat"].shape == xs.shape
+
+    def test_entroformer(self):
+        # Small config for speed: 1 / 6 the released N=192/M=384 / 1 / 6 of dim_embed.
+        # 64x64 input -> y is 4x4 (4 stride-2 stages), z is 1x1 (scale=2 more).
+        model = Entroformer(
+            N=64,
+            M=128,
+            Z=64,
+            dim_embed=128,
+            depth=4,
+            heads=4,
+            dim_head=32,
+            mlp_ratio=4,
+            position_num=5,
+            scale=2,
+            attn_topk=-1,
+            num_parameter=2,
+        )
+        model.eval()
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            out = model(x)
+
+        assert "x_hat" in out
+        assert "likelihoods" in out
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 128, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 64, 1, 1)
+        # Output is rescaled to [0,1] from g_s's [-1,1] range; values should be
+        # finite (not necessarily clamped, since the model leaves clamping to
+        # the caller for training-time rate estimation).
+        assert torch.isfinite(out["x_hat"]).all()
+
+        # state_dict roundtrip via from_state_dict (N/M/Z/dim_embed/depth/heads
+        # /position_num/scale/num_parameter all inferred from tensor shapes).
+        loaded = Entroformer.from_state_dict(model.state_dict())
+        assert loaded.N == 64
+        assert loaded.M == 128
+        assert loaded.Z == 64
+        assert loaded._hparams["dim_embed"] == 128
+        assert loaded._hparams["depth"] == 4
+        assert loaded._hparams["heads"] == 4
+        assert loaded._hparams["dim_head"] == 32
+        assert loaded._hparams["position_num"] == 5
+        assert loaded._hparams["scale"] == 2
+        assert loaded._hparams["num_parameter"] == 2
+
+        loaded.eval()
+        with torch.no_grad():
+            out2 = loaded(x)
+        assert torch.allclose(out["x_hat"], out2["x_hat"])
+        assert torch.allclose(out["likelihoods"]["y"], out2["likelihoods"]["y"])
+        assert torch.allclose(out["likelihoods"]["z"], out2["likelihoods"]["z"])
+
+    def test_qian2021ref(self):
+        # Small config for speed: N=64/M=128/Z=64 (vs released N=192/M=384/Z=192).
+        # 64x64 input -> y is 4x4 (4 stride-2 stages), z is 1x1 (2 more in h_a).
+        model = RefBasedAR(N=64, M=128, Z=64, norm="GSDN", sk=3)
+        model.eval()
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            out = model(x)
+
+        assert "x_hat" in out
+        assert "likelihoods" in out
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 128, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 64, 1, 1)
+        assert torch.isfinite(out["x_hat"]).all()
+        assert (out["likelihoods"]["y"] > 0).all()
+        assert (out["likelihoods"]["z"] > 0).all()
+
+        # state_dict roundtrip via from_state_dict (N/M/Z/norm/sk/head_channels inferred)
+        loaded = RefBasedAR.from_state_dict(model.state_dict())
+        assert loaded.N == 64
+        assert loaded.M == 128
+        assert loaded.Z == 64
+        assert loaded.norm == "GSDN"
+        assert loaded.sk == 3
+        assert loaded._hparams["head_channels"] == 3 * 128
+
+        loaded.eval()
+        with torch.no_grad():
+            out2 = loaded(x)
+        assert torch.allclose(out["x_hat"], out2["x_hat"])
+        assert torch.allclose(out["likelihoods"]["y"], out2["likelihoods"]["y"])
+        assert torch.allclose(out["likelihoods"]["z"], out2["likelihoods"]["z"])
+
+        # Verify GDN variant also works (no GSDN beta2/gamma2, the from_state_dict
+        # branch detects this via the absence of `g_a.encoder.1.beta2`).
+        model_gdn = RefBasedAR(N=64, M=128, Z=64, norm="GDN", sk=3)
+        loaded_gdn = RefBasedAR.from_state_dict(model_gdn.state_dict())
+        assert loaded_gdn.norm == "GDN"
 
     @pytest.mark.parametrize(
         "variant", ["scale", "ms", "sc"]

@@ -36,6 +36,7 @@ from compressai.models import (
     Cheng2020Anchor,
     Cheng2020Attention,
     DCAE,
+    Entroformer,
     FactorizedPrior,
     FrequencyAwareTransFormer,
     GainedMSHyperprior,
@@ -48,6 +49,7 @@ from compressai.models import (
     MambaVC,
     MLICPlusPlus,
     MeanScaleHyperprior,
+    RefBasedAR,
     SAAF,
     SCGainedMSHyperprior,
     ScaleHyperprior,
@@ -68,6 +70,7 @@ from compressai.zoo import (
     candidate_model_architectures,
     cmic,
     dcae,
+    entroformer,
     ftic,
     hpcm,
     hpcm_base,
@@ -82,6 +85,7 @@ from compressai.zoo import (
     mbt2018_mean,
     mbt2018_mean_gained,
     mbt2018_mean_gained_sc,
+    qian2021_ref,
     saaf,
     shiftlic_large,
     shiftlic_middle,
@@ -390,6 +394,33 @@ class TestCandidateModels:
 
         with pytest.raises(RuntimeError, match="not yet available"):
             informer(pretrained=True)
+
+    def test_entroformer(self):
+        net = entroformer(
+            N=32,
+            M=64,
+            Z=32,
+            dim_embed=64,
+            depth=2,
+            heads=2,
+            dim_head=32,
+            mlp_ratio=2,
+            position_num=5,
+            scale=2,
+            attn_topk=-1,
+            num_parameter=2,
+        )
+        assert isinstance(net, Entroformer)
+        assert candidate_model_architectures["entroformer"] is Entroformer
+        with pytest.raises(RuntimeError, match="not yet available"):
+            entroformer(pretrained=True)
+
+    def test_qian2021_ref(self):
+        net = qian2021_ref(N=32, M=64, Z=32, norm="GSDN", sk=3)
+        assert isinstance(net, RefBasedAR)
+        assert candidate_model_architectures["qian2021-ref"] is RefBasedAR
+        with pytest.raises(RuntimeError, match="not yet available"):
+            qian2021_ref(pretrained=True)
 
     @pytest.mark.parametrize(
         "factory,arch_key,cls",

@@ -37,7 +37,11 @@ import torch.nn as nn
 
 from torch import Tensor
 
-from compressai.entropy_models import EntropyBottleneck, GaussianConditional
+from compressai.entropy_models import (
+    EntropyBottleneck,
+    GaussianConditional,
+    LearnedGaussianBottleneck,
+)
 from compressai.latent_codecs import LatentCodec
 from compressai.models.utils import remap_old_keys, update_registered_buffers
 
@@ -113,6 +117,14 @@ class CompressionModel(nn.Module):
                     state_dict,
                 )
 
+            if isinstance(module, LearnedGaussianBottleneck):
+                update_registered_buffers(
+                    module,
+                    name,
+                    ["_quantized_cdf", "_offset", "_cdf_length"],
+                    state_dict,
+                )
+
         return nn.Module.load_state_dict(self, state_dict, strict=strict)
 
     def update(self, scale_table=None, force=False, update_quantiles: bool = False):
@@ -139,6 +151,8 @@ class CompressionModel(nn.Module):
                 updated |= module.update(force=force, update_quantiles=update_quantiles)
             if isinstance(module, GaussianConditional):
                 updated |= module.update_scale_table(scale_table, force=force)
+            if isinstance(module, LearnedGaussianBottleneck):
+                updated |= module.update(force=force)
         return updated
 
     def aux_loss(self) -> Tensor:
