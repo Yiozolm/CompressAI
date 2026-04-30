@@ -29,7 +29,8 @@
 
 import pytest
 
-from compressai.layers import is_freia_available, is_pytorch_wavelets_available
+from compressai.layers import is_pytorch_wavelets_available
+from compressai.models import is_freia_available
 from compressai.models import (
     CCAModel,
     CMIC,

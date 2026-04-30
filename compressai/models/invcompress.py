@@ -1,29 +1,348 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Sequence, Tuple, TypeVar
+from importlib import import_module, util
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, TypeVar
 
 import warnings
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.init as init
 
 from torch import Tensor
 
 from compressai.layers import AttentionBlock
-from compressai.layers.lic import (
-    CouplingLayer,
-    EnhBlock,
-    InvertibleConv1x1,
-    SqueezeLayer,
-    is_freia_available,
-)
 from compressai.registry import register_model
 
 from .waseda import Cheng2020Anchor
 
-__all__ = ["InvCompress", "convert_upstream_state_dict"]
+__all__ = [
+    "InvCompress",
+    "convert_upstream_state_dict",
+    "is_freia_available",
+]
+
+
+# ---------------------------------------------------------------------------
+# FrEIA wrappers and invertible building blocks
+# (formerly compressai/layers/lic/invertible.py)
+# ---------------------------------------------------------------------------
+
+
+_FREIA_MODULES: Optional[Any] = None
+_FREIA_IMPORT_ERROR: Optional[ModuleNotFoundError] = None
+
+
+def is_freia_available() -> bool:
+    return util.find_spec("FrEIA") is not None
+
+
+def _load_freia_modules() -> Any:
+    global _FREIA_IMPORT_ERROR, _FREIA_MODULES
+
+    if _FREIA_MODULES is not None:
+        return _FREIA_MODULES
+
+    try:
+        _FREIA_MODULES = import_module("FrEIA.modules")
+    except ModuleNotFoundError as error:
+        _FREIA_IMPORT_ERROR = error
+        raise ModuleNotFoundError(
+            "Invertible layers require the optional dependency `FrEIA`."
+        ) from error
+    return _FREIA_MODULES
+
+
+def _resolve_freia_class(candidate_names: Sequence[str]) -> Any:
+    modules = _load_freia_modules()
+    for candidate_name in candidate_names:
+        if hasattr(modules, candidate_name):
+            return getattr(modules, candidate_name)
+    raise AttributeError(
+        "Unable to find any of "
+        f"{tuple(candidate_names)} in `FrEIA.modules`."
+    )
+
+
+def _extract_tensor(output: Any) -> Tensor:
+    if isinstance(output, Tensor):
+        return output
+    if isinstance(output, (list, tuple)):
+        first = output[0]
+        if isinstance(first, Tensor):
+            return first
+        if isinstance(first, (list, tuple)) and first and isinstance(first[0], Tensor):
+            return first[0]
+    raise TypeError("Unsupported FrEIA output structure.")
+
+
+def _call_backend(backend: nn.Module, input_tensor: Tensor, reverse: bool) -> Tensor:
+    call_patterns = (
+        lambda: backend([input_tensor], rev=reverse),
+        lambda: backend(input_tensor, rev=reverse),
+        lambda: backend([input_tensor], reverse=reverse),
+        lambda: backend(input_tensor, reverse=reverse),
+        lambda: backend([input_tensor]),
+        lambda: backend(input_tensor),
+    )
+    type_errors = []
+    for pattern in call_patterns:
+        try:
+            return _extract_tensor(pattern())
+        except TypeError as error:
+            type_errors.append(error)
+    raise TypeError(
+        "Could not dispatch to the wrapped FrEIA backend."
+    ) from type_errors[-1]
+
+
+def build_freia_coupling_layer(
+    *args: Any,
+    kind: str = "glow",
+    **kwargs: Any,
+) -> nn.Module:
+    kind_to_candidates = {
+        "glow": ("GLOWCouplingBlock",),
+        "rnvp": ("RNVPCouplingBlock",),
+        "nice": ("NICECouplingBlock",),
+    }
+    if kind not in kind_to_candidates:
+        raise ValueError(f"Unsupported coupling kind: {kind}")
+    coupling_class = _resolve_freia_class(kind_to_candidates[kind])
+    return coupling_class(*args, **kwargs)
+
+
+def build_freia_invertible_conv(*args: Any, **kwargs: Any) -> nn.Module:
+    conv_class = _resolve_freia_class(
+        ("InvertibleConv1x1", "Fixed1x1ConvOrthogonal", "Fixed1x1Conv")
+    )
+    if conv_class.__name__ == "Fixed1x1Conv" and "M" not in kwargs:
+        if not args:
+            raise ValueError("dims_in must be provided to initialize Fixed1x1Conv.")
+        dims_in = args[0]
+        if not dims_in or not isinstance(dims_in, (list, tuple)):
+            raise ValueError("dims_in must be a non-empty sequence.")
+        num_channels = dims_in[0][0]
+        random_matrix = torch.randn(num_channels, num_channels)
+        orthogonal_matrix, _ = torch.linalg.qr(random_matrix)
+        kwargs["M"] = orthogonal_matrix
+    return conv_class(*args, **kwargs)
+
+
+def build_freia_squeeze_pair(
+    *args: Any,
+    downsample_name: str = "IRevNetDownsampling",
+    upsample_name: str = "IRevNetUpsampling",
+    **kwargs: Any,
+) -> Tuple[nn.Module, nn.Module]:
+    downsample_class = _resolve_freia_class((downsample_name,))
+    upsample_class = _resolve_freia_class((upsample_name,))
+    downsample_backend = downsample_class(*args, **kwargs)
+    if not args:
+        raise ValueError("dims_in must be provided to initialize FrEIA squeeze.")
+    upsample_dims_in = downsample_backend.output_dims(args[0])
+    upsample_backend = upsample_class(upsample_dims_in, **kwargs)
+    return downsample_backend, upsample_backend
+
+
+def _initialize_weights(modules: Sequence[nn.Module], scale: float = 1.0) -> None:
+    for module in modules:
+        for layer in module.modules():
+            if isinstance(layer, nn.Conv2d):
+                init.kaiming_normal_(layer.weight, a=0, mode="fan_in")
+                layer.weight.data *= scale
+                if layer.bias is not None:
+                    layer.bias.data.zero_()
+            elif isinstance(layer, nn.Linear):
+                init.kaiming_normal_(layer.weight, a=0, mode="fan_in")
+                layer.weight.data *= scale
+                if layer.bias is not None:
+                    layer.bias.data.zero_()
+            elif isinstance(layer, nn.BatchNorm2d):
+                init.constant_(layer.weight, 1)
+                init.constant_(layer.bias.data, 0.0)
+
+
+def _initialize_weights_xavier(
+    modules: Sequence[nn.Module],
+    scale: float = 1.0,
+) -> None:
+    for module in modules:
+        for layer in module.modules():
+            if isinstance(layer, nn.Conv2d):
+                init.xavier_normal_(layer.weight)
+                layer.weight.data *= scale
+                if layer.bias is not None:
+                    layer.bias.data.zero_()
+            elif isinstance(layer, nn.Linear):
+                init.xavier_normal_(layer.weight)
+                layer.weight.data *= scale
+                if layer.bias is not None:
+                    layer.bias.data.zero_()
+            elif isinstance(layer, nn.BatchNorm2d):
+                init.constant_(layer.weight, 1)
+                init.constant_(layer.bias.data, 0.0)
+
+
+class _DenseBlock(nn.Module):
+    def __init__(
+        self,
+        channel_in: int,
+        channel_out: int,
+        init_method: str = "xavier",
+        growth_channels: int = 32,
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(channel_in, growth_channels, 3, 1, 1, bias=bias)
+        self.conv2 = nn.Conv2d(
+            channel_in + growth_channels,
+            growth_channels,
+            3,
+            1,
+            1,
+            bias=bias,
+        )
+        self.conv3 = nn.Conv2d(
+            channel_in + 2 * growth_channels,
+            growth_channels,
+            3,
+            1,
+            1,
+            bias=bias,
+        )
+        self.conv4 = nn.Conv2d(
+            channel_in + 3 * growth_channels,
+            growth_channels,
+            3,
+            1,
+            1,
+            bias=bias,
+        )
+        self.conv5 = nn.Conv2d(
+            channel_in + 4 * growth_channels,
+            channel_out,
+            3,
+            1,
+            1,
+            bias=bias,
+        )
+        self.activation = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+
+        if init_method == "xavier":
+            _initialize_weights_xavier(
+                [self.conv1, self.conv2, self.conv3, self.conv4],
+                scale=0.1,
+            )
+        else:
+            _initialize_weights(
+                [self.conv1, self.conv2, self.conv3, self.conv4],
+                scale=0.1,
+            )
+        _initialize_weights([self.conv5], scale=0.0)
+
+    def forward(self, input_tensor: Tensor) -> Tensor:
+        feat1 = self.activation(self.conv1(input_tensor))
+        feat2 = self.activation(self.conv2(torch.cat((input_tensor, feat1), 1)))
+        feat3 = self.activation(
+            self.conv3(torch.cat((input_tensor, feat1, feat2), 1))
+        )
+        feat4 = self.activation(
+            self.conv4(torch.cat((input_tensor, feat1, feat2, feat3), 1))
+        )
+        return self.conv5(
+            torch.cat((input_tensor, feat1, feat2, feat3, feat4), 1)
+        )
+
+
+class _EnhBlock(nn.Module):
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.layers = nn.Sequential(
+            _DenseBlock(3, channels),
+            nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0),
+            nn.Conv2d(channels, channels, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0),
+            _DenseBlock(channels, 3),
+        )
+
+    def forward(self, input_tensor: Tensor) -> Tensor:
+        return input_tensor + self.layers(input_tensor) * 0.2
+
+
+class _CouplingLayer(nn.Module):
+    def __init__(self, backend: nn.Module) -> None:
+        super().__init__()
+        self.backend = backend
+
+    @classmethod
+    def from_freia(cls, *args: Any, **kwargs: Any) -> "_CouplingLayer":
+        return cls(build_freia_coupling_layer(*args, **kwargs))
+
+    def forward(
+        self,
+        input_tensor: Tensor,
+        reverse: bool = False,
+        rev: Optional[bool] = None,
+    ) -> Tensor:
+        use_reverse = rev if rev is not None else reverse
+        return _call_backend(self.backend, input_tensor, use_reverse)
+
+
+class _InvertibleConv1x1(nn.Module):
+    def __init__(self, backend: nn.Module) -> None:
+        super().__init__()
+        self.backend = backend
+
+    @classmethod
+    def from_freia(cls, *args: Any, **kwargs: Any) -> "_InvertibleConv1x1":
+        return cls(build_freia_invertible_conv(*args, **kwargs))
+
+    def forward(
+        self,
+        input_tensor: Tensor,
+        reverse: bool = False,
+        rev: Optional[bool] = None,
+    ) -> Tensor:
+        use_reverse = rev if rev is not None else reverse
+        return _call_backend(self.backend, input_tensor, use_reverse)
+
+
+class _SqueezeLayer(nn.Module):
+    def __init__(
+        self,
+        downsample_backend: nn.Module,
+        upsample_backend: nn.Module,
+    ) -> None:
+        super().__init__()
+        self.downsample_backend = downsample_backend
+        self.upsample_backend = upsample_backend
+
+    @classmethod
+    def from_freia(cls, *args: Any, **kwargs: Any) -> "_SqueezeLayer":
+        downsample_backend, upsample_backend = build_freia_squeeze_pair(
+            *args,
+            **kwargs,
+        )
+        return cls(downsample_backend, upsample_backend)
+
+    def forward(
+        self,
+        input_tensor: Tensor,
+        reverse: bool = False,
+        rev: Optional[bool] = None,
+    ) -> Tensor:
+        use_reverse = rev if rev is not None else reverse
+        backend = self.upsample_backend if use_reverse else self.downsample_backend
+        return _call_backend(backend, input_tensor, reverse=False)
+
+
+# ---------------------------------------------------------------------------
+# InvCompress model
+# ---------------------------------------------------------------------------
+
 
 _FREIA_DUMMY_SPATIAL = 16
 _ModelType = TypeVar("_ModelType", bound=type[nn.Module])
@@ -106,7 +425,7 @@ class _BottleneckSubnet(nn.Module):
         return self.conv3(output)
 
 
-def _build_coupling_layer(channels: int, kernel_size: int) -> CouplingLayer:
+def _build_coupling_layer(channels: int, kernel_size: int) -> _CouplingLayer:
     dims_in = _freia_dims(channels)
     split_length = channels // 4
 
@@ -133,40 +452,40 @@ def _build_coupling_layer(channels: int, kernel_size: int) -> CouplingLayer:
     errors: list[TypeError] = []
     for kwargs in candidates:
         try:
-            return CouplingLayer.from_freia(dims_in, **kwargs)
+            return _CouplingLayer.from_freia(dims_in, **kwargs)
         except TypeError as error:
             errors.append(error)
     raise TypeError("Unable to initialize FrEIA coupling layer.") from errors[-1]
 
 
-def _build_invertible_conv(channels: int) -> InvertibleConv1x1:
+def _build_invertible_conv(channels: int) -> _InvertibleConv1x1:
     dims_in = _freia_dims(channels)
     errors: list[TypeError] = []
     # FrEIA 0.2 does not expose `InvertibleConv1x1`; its closest equivalent is
-    # `Fixed1x1Conv`. The wrapper in `compressai.layers.lic.invertible`
-    # normalizes that API difference, so the model keeps a single call site.
+    # `Fixed1x1Conv`. The local `_InvertibleConv1x1` wrapper above normalizes
+    # that API difference, so the model keeps a single call site.
     for kwargs in ({"LU_decomposed": False}, {}):
         try:
-            return InvertibleConv1x1.from_freia(dims_in, **kwargs)
+            return _InvertibleConv1x1.from_freia(dims_in, **kwargs)
         except TypeError as error:
             errors.append(error)
     raise TypeError("Unable to initialize FrEIA invertible 1x1 conv.") from errors[-1]
 
 
-def _build_squeeze_layer(channels: int) -> SqueezeLayer:
+def _build_squeeze_layer(channels: int) -> _SqueezeLayer:
     dims_in = _freia_dims(channels)
     errors: list[TypeError] = []
     # FrEIA's `IRevNetUpsampling` is initialized from the downsampled shape
-    # rather than the pre-squeeze shape. `SqueezeLayer.from_freia` hides that
+    # rather than the pre-squeeze shape. `_SqueezeLayer.from_freia` hides that
     # version-specific constructor requirement for InvCompress.
     # `legacy_backend=True` reproduces upstream's
     # `permute(0, 3, 5, 1, 2, 4)` channel ordering (`a1, a2, ..., b1, b2, ...`),
     # which is required for the published InvCompress checkpoints; the
     # FrEIA default (a strided-conv backend) interleaves channels differently
-    # and would invalidate the trained `InvertibleConv1x1` weights downstream.
+    # and would invalidate the trained `_InvertibleConv1x1` weights downstream.
     for kwargs in ({"legacy_backend": True},):
         try:
-            return SqueezeLayer.from_freia(dims_in, **kwargs)
+            return _SqueezeLayer.from_freia(dims_in, **kwargs)
         except TypeError as error:
             errors.append(error)
     raise TypeError("Unable to initialize FrEIA squeeze layer.") from errors[-1]
@@ -186,8 +505,8 @@ class _AttentionModule(nn.Module):
 class _EnhancementModule(nn.Module):
     def __init__(self, channels: int) -> None:
         super().__init__()
-        self.forw_enh = EnhBlock(channels)
-        self.back_enh = EnhBlock(channels)
+        self.forw_enh = _EnhBlock(channels)
+        self.back_enh = _EnhBlock(channels)
 
     def forward(self, input_tensor: Tensor, reverse: bool = False) -> Tensor:
         block = self.back_enh if reverse else self.forw_enh

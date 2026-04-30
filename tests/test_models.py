@@ -31,7 +31,8 @@ import pytest
 import torch
 import torch.nn as nn
 
-from compressai.layers import is_freia_available, is_pytorch_wavelets_available
+from compressai.layers import is_pytorch_wavelets_available
+from compressai.models import is_freia_available
 from compressai.entropy_models import EntropyBottleneck
 from compressai.latent_codecs import (
     ChannelSliceLatentCodec,

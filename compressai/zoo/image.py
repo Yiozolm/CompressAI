@@ -29,7 +29,7 @@
 
 from torch.hub import load_state_dict_from_url
 
-from compressai.layers import is_freia_available, is_pytorch_wavelets_available
+from compressai.layers import is_pytorch_wavelets_available
 from compressai.models import (
     CCAModel,
     CMIC,
@@ -62,6 +62,7 @@ from compressai.models import (
     TinyLIC,
     WeConvene,
     WACNN,
+    is_freia_available,
 )
 
 from .pretrained import load_pretrained
