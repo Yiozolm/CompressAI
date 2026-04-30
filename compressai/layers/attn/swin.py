@@ -19,7 +19,6 @@ from .swin_attention import (
 )
 
 __all__ = [
-    "Block",
     "ConvTransBlock",
     "PatchMerging",
     "PatchSplit",
@@ -27,7 +26,6 @@ __all__ = [
     "SwinBlock",
     "WMSA",
     "WinNoShiftAttention",
-    "Win_noShift_Attention",
     "build_window_attention_mask",
     "window_partition",
     "window_reverse",
@@ -390,4 +388,14 @@ class PatchSplit(nn.Module):
         return output.view(batch_size, 4 * length, -1)
 
 
-Win_noShift_Attention = WinNoShiftAttention
+def __getattr__(name):
+    if name == "Win_noShift_Attention":
+        import warnings
+
+        warnings.warn(
+            "Win_noShift_Attention is deprecated; use WinNoShiftAttention instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return WinNoShiftAttention
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

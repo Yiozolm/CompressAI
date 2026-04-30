@@ -10,7 +10,7 @@ import torch.nn as nn
 
 from timm.models.layers import DropPath
 
-from ..natten import NeighborhoodAttention
+from .natten import NeighborhoodAttention
 
 
 __all__ = [

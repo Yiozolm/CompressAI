@@ -20,20 +20,16 @@ from .inference import (
     infer_swatten_window_size,
 )
 from .nsa import (
-    BasicViTLayer,
-    Mlp,
     NSABlock,
     ResViTBlock,
 )
 from .rstb import (
-    BasicSwinLayer,
     PatchEmbed1D,
     PatchUnEmbed1D,
     RSTB,
     SwinTransformerBlock,
 )
 from .swin import (
-    Block,
     ConvTransBlock,
     PatchMerging,
     PatchSplit,
@@ -41,7 +37,6 @@ from .swin import (
     SwinBlock,
     WMSA,
     WinNoShiftAttention,
-    Win_noShift_Attention,
 )
 from .swin_attention import (
     WindowAttention,
@@ -51,9 +46,6 @@ from .swin_attention import (
 )
 
 __all__ = [
-    "BasicSwinLayer",
-    "BasicViTLayer",
-    "Block",
     "CausalAttentionModule",
     "ConvTransBlock",
     "CrossAttention",
@@ -65,7 +57,6 @@ __all__ = [
     "EntroformerFeedForward",
     "EntroformerPreNorm",
     "EntroformerUpPixelShuffle",
-    "Mlp",
     "NSABlock",
     "PatchEmbed1D",
     "PatchMerging",
@@ -81,7 +72,6 @@ __all__ = [
     "TransHyperScale",
     "WMSA",
     "WinNoShiftAttention",
-    "Win_noShift_Attention",
     "WindowAttention",
     "WindowedCrossAttention",
     "build_window_attention_mask",
@@ -92,3 +82,11 @@ __all__ = [
     "window_partition",
     "window_reverse",
 ]
+
+
+def __getattr__(name):
+    if name == "Win_noShift_Attention":
+        from .swin import Win_noShift_Attention as _alias
+
+        return _alias
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
