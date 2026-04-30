@@ -85,23 +85,6 @@ from .cmic import (
     CMICStage,
     CMICSynthesisTransform,
 )
-from .ftic import (
-    BranchWindowAttention,
-    FATBlock,
-    FTICAnalysisTransform,
-    FTICHyperAnalysisTransform,
-    FTICHyperSynthesisTransform,
-    FTICSynthesisTransform,
-    SwinFDWA,
-    WindowFrequencyModulation,
-)
-from .tca import (
-    ConvPositionalEncoding,
-    MaskedSliceChannelAttention,
-    TCA,
-    TCABlock,
-    TCAEntropyModel,
-)
 
 __all__ = [
     "AnalysisTransform",
@@ -156,7 +139,6 @@ __all__ = [
     "CMICSpatialContextBlock",
     "CMICStage",
     "CMICSynthesisTransform",
-    "BranchWindowAttention",
     "build_freia_coupling_layer",
     "build_freia_invertible_conv",
     "build_freia_squeeze_pair",
@@ -164,22 +146,10 @@ __all__ = [
     "CheapCS1",
     "CheapChannelV1",
     "CouplingLayer",
-    "ConvPositionalEncoding",
     "EntropyParameters",
-    "FATBlock",
-    "FTICAnalysisTransform",
-    "FTICHyperAnalysisTransform",
-    "FTICHyperSynthesisTransform",
-    "FTICSynthesisTransform",
     "is_freia_available",
-    "MaskedSliceChannelAttention",
     "ResidualBlockShift",
     "ResidualShiftStack",
     "SFT",
     "Shift4",
-    "SwinFDWA",
-    "TCA",
-    "TCABlock",
-    "TCAEntropyModel",
-    "WindowFrequencyModulation",
 ]
