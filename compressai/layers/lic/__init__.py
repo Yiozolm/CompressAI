@@ -51,6 +51,7 @@ from .shift import (
     Shift4,
     channel_shuffle,
 )
+from .sft import SFT
 from .mlic import (
     AnalysisTransform,
     ChannelContext,
@@ -152,6 +153,7 @@ __all__ = [
     "MaskedSliceChannelAttention",
     "ResidualBlockShift",
     "ResidualShiftStack",
+    "SFT",
     "Shift4",
     "SwinFDWA",
     "TCA",

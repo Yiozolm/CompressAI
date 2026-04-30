@@ -38,6 +38,8 @@ from compressai.models import (
     DCAE,
     FactorizedPrior,
     FrequencyAwareTransFormer,
+    GainedMSHyperprior,
+    GainedScaleHyperprior,
     HPCM,
     Informer,
     InvCompress,
@@ -47,6 +49,7 @@ from compressai.models import (
     MLICPlusPlus,
     MeanScaleHyperprior,
     SAAF,
+    SCGainedMSHyperprior,
     ScaleHyperprior,
     ShiftLIC,
     TCM,
@@ -58,6 +61,7 @@ from compressai.zoo import (
     bmshj2018_factorized,
     bmshj2018_factorized_relu,
     bmshj2018_hyperprior,
+    bmshj2018_hyperprior_gained,
     cca,
     cheng2020_anchor,
     cheng2020_attn,
@@ -76,6 +80,8 @@ from compressai.zoo import (
     mlicpp,
     mbt2018,
     mbt2018_mean,
+    mbt2018_mean_gained,
+    mbt2018_mean_gained_sc,
     saaf,
     shiftlic_large,
     shiftlic_middle,
@@ -384,6 +390,34 @@ class TestCandidateModels:
 
         with pytest.raises(RuntimeError, match="not yet available"):
             informer(pretrained=True)
+
+    @pytest.mark.parametrize(
+        "factory,arch_key,cls",
+        [
+            (
+                bmshj2018_hyperprior_gained,
+                "bmshj2018-hyperprior-gained",
+                GainedScaleHyperprior,
+            ),
+            (
+                mbt2018_mean_gained,
+                "mbt2018-mean-gained",
+                GainedMSHyperprior,
+            ),
+            (
+                mbt2018_mean_gained_sc,
+                "mbt2018-mean-gained-sc",
+                SCGainedMSHyperprior,
+            ),
+        ],
+    )
+    def test_gained(self, factory, arch_key, cls):
+        net = factory(N=32, M=48, lmbda=[0.05, 0.01, 0.001])
+        assert isinstance(net, cls)
+        assert net.levels == 3
+        assert candidate_model_architectures[arch_key] is cls
+        with pytest.raises(RuntimeError, match="not yet available"):
+            factory(pretrained=True)
 
     @pytest.mark.parametrize(
         "factory,variant",

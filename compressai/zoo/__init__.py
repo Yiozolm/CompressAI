@@ -31,6 +31,7 @@ from .image import (
     bmshj2018_factorized,
     bmshj2018_factorized_relu,
     bmshj2018_hyperprior,
+    bmshj2018_hyperprior_gained,
     candidate_model_architectures,
     candidate_model_urls,
     cca,
@@ -51,6 +52,8 @@ from .image import (
     mlicpp,
     mbt2018,
     mbt2018_mean,
+    mbt2018_mean_gained,
+    mbt2018_mean_gained_sc,
     saaf,
     shiftlic_large,
     shiftlic_middle,
@@ -102,6 +105,9 @@ image_models = {
     "bmshj2018-hyperprior-vbr": bmshj2018_hyperprior_vbr,
     "mbt2018-mean-vbr": mbt2018_mean_vbr,
     "mbt2018-vbr": mbt2018_vbr,
+    "bmshj2018-hyperprior-gained": bmshj2018_hyperprior_gained,
+    "mbt2018-mean-gained": mbt2018_mean_gained,
+    "mbt2018-mean-gained-sc": mbt2018_mean_gained_sc,
 }
 
 # Not yet available.

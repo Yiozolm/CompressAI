@@ -44,6 +44,8 @@ from compressai.models import (
     CMIC,
     DCAE,
     FrequencyAwareTransFormer,
+    GainedMSHyperprior,
+    GainedScaleHyperprior,
     HPCM,
     Informer,
     InvCompress,
@@ -51,6 +53,7 @@ from compressai.models import (
     MambaVC,
     MLICPlusPlus,
     SAAF,
+    SCGainedMSHyperprior,
     ShiftLIC,
     TCM,
     TIC,
@@ -1171,6 +1174,67 @@ class TestModels:
         assert len(compressed["strings"][1]) == xs.size(0)
         assert len(compressed["strings"][2]) == xs.size(0)
         assert decoded["x_hat"].shape == xs.shape
+
+    @pytest.mark.parametrize(
+        "variant", ["scale", "ms", "sc"]
+    )
+    def test_gained(self, variant):
+        # Small config to keep RANS roundtrip cheap; 3 levels lets us exercise
+        # interpolation between adjacent levels (s in [0, levels-2]).
+        N, M = 32, 48
+        lmbda = [0.05, 0.01, 0.001]
+
+        if variant == "scale":
+            model = GainedScaleHyperprior(N=N, M=M, lmbda=lmbda)
+            cls = GainedScaleHyperprior
+        elif variant == "ms":
+            model = GainedMSHyperprior(N=N, M=M, lmbda=lmbda)
+            cls = GainedMSHyperprior
+        else:
+            model = SCGainedMSHyperprior(N=N, M=M, lmbda=lmbda)
+            cls = SCGainedMSHyperprior
+
+        model.eval()
+
+        x = torch.rand(1, 3, 128, 128)
+        qmap = torch.rand(1, 1, 128, 128)
+
+        # Forward at every discrete level.
+        for s in range(model.levels):
+            with torch.no_grad():
+                if variant == "sc":
+                    out = model(x, s=s, qmap=qmap)
+                else:
+                    out = model(x, s=s)
+            assert out["x_hat"].shape == x.shape
+            assert "y" in out and "y_hat" in out
+            assert out["likelihoods"]["y"].shape[1] == M
+            assert out["likelihoods"]["z"].shape[1] == N
+
+        # state_dict roundtrip via from_state_dict (N/M/levels inferred).
+        loaded = cls.from_state_dict(model.state_dict())
+        assert loaded.N == N
+        assert loaded.M == M
+        assert loaded.levels == len(lmbda)
+
+        # Bitstream roundtrip — only for the two variants with checkerboard-free
+        # entropy. SC also works but the qmap input is not part of the stream.
+        model.update(force=True)
+        if variant == "scale":
+            with torch.no_grad():
+                enc = model.compress(x, s=0, l=0.5)
+                dec = model.decompress(enc["strings"], enc["shape"], s=0, l=0.5)
+        elif variant == "ms":
+            with torch.no_grad():
+                enc = model.compress(x, s=0, l=0.5)
+                dec = model.decompress(enc["strings"], enc["shape"], s=0, l=0.5)
+        else:
+            with torch.no_grad():
+                enc = model.compress(x, s=0, l=0.5, qmap=qmap)
+                dec = model.decompress(enc["strings"], enc["shape"], s=0, l=0.5)
+
+        assert len(enc["strings"]) == 2
+        assert dec["x_hat"].shape == x.shape
 
 
 def test_scale_table_default():

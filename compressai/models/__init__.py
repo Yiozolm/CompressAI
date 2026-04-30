@@ -32,6 +32,7 @@ from .cca import *
 from .cmic import *
 from .dcae import *
 from .ftic import *
+from .gained import *
 from .glic import *
 from .google import *
 from .hpcm import *

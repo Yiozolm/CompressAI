@@ -39,6 +39,8 @@ from compressai.models import (
     FactorizedPrior,
     FactorizedPriorReLU,
     FrequencyAwareTransFormer,
+    GainedMSHyperprior,
+    GainedScaleHyperprior,
     GLIC,
     HPCM,
     Informer,
@@ -49,6 +51,7 @@ from compressai.models import (
     MLICPlusPlus,
     MeanScaleHyperprior,
     SAAF,
+    SCGainedMSHyperprior,
     ScaleHyperprior,
     ShiftLIC,
     SymmetricalTransFormer,
@@ -65,6 +68,7 @@ __all__ = [
     "bmshj2018_factorized",
     "bmshj2018_factorized_relu",
     "bmshj2018_hyperprior",
+    "bmshj2018_hyperprior_gained",
     "cca",
     "cmic",
     "dcae",
@@ -91,6 +95,8 @@ __all__ = [
     "weconvene",
     "mbt2018",
     "mbt2018_mean",
+    "mbt2018_mean_gained",
+    "mbt2018_mean_gained_sc",
     "cheng2020_anchor",
     "cheng2020_attn",
     "candidate_model_architectures",
@@ -133,6 +139,9 @@ candidate_model_architectures = {
     "shiftlic-small": ShiftLIC,
     "shiftlic-middle": ShiftLIC,
     "shiftlic-large": ShiftLIC,
+    "bmshj2018-hyperprior-gained": GainedScaleHyperprior,
+    "mbt2018-mean-gained": GainedMSHyperprior,
+    "mbt2018-mean-gained-sc": SCGainedMSHyperprior,
 }
 
 root_url = "https://compressai.s3.amazonaws.com/models/v1"
@@ -594,6 +603,52 @@ def weconvene(pretrained: bool = False, progress: bool = True, **kwargs):
             "Install `compressai[lic]` to enable this model."
         )
     return WeConvene(**kwargs)
+
+
+def bmshj2018_hyperprior_gained(
+    pretrained: bool = False, progress: bool = True, **kwargs
+):
+    """Gained variable-rate ScaleHyperprior (Cui et al., CVPR 2021).
+
+    A single model trained over a discrete lambda grid; per-channel learned
+    ``Gain``/``InverseGain`` vectors plus power-mean interpolation between
+    adjacent levels enable continuous rate adaptation. Pre-trained weights
+    are not mirrored (the upstream community ckpt only covers the MS variant).
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return GainedScaleHyperprior(**kwargs)
+
+
+def mbt2018_mean_gained(
+    pretrained: bool = False, progress: bool = True, **kwargs
+):
+    """Gained variable-rate MeanScaleHyperprior (Cui et al., CVPR 2021).
+
+    The community-trained checkpoint at
+    ``candidate/GainedVAE/checkpoint_gainmshp_epoch90.pth`` (N=128, M=192,
+    8 levels) loads via :meth:`GainedMSHyperprior.from_state_dict`.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return GainedMSHyperprior(**kwargs)
+
+
+def mbt2018_mean_gained_sc(
+    pretrained: bool = False, progress: bool = True, **kwargs
+):
+    """Spatial-channel gained MS hyperprior with SFT modulation.
+
+    Adds a quality-map (qmap) input fused via SPADE-style SFT blocks at three
+    encoder stages and re-injected on the decoder side. No upstream pretrained
+    checkpoint exists for this variant.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return SCGainedMSHyperprior(**kwargs)
 
 
 def bmshj2018_factorized(
