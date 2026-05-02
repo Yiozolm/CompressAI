@@ -5,12 +5,12 @@ M. Han, S. Jiang, S. Li, X. Deng, M. Xu, C. Zhu, S. Gu:
 `"Causal Context Adjustment Loss for Learned Image Compression"
 <https://arxiv.org/abs/2410.04847>`_, NeurIPS 2024.
 
-The shared CCA bits (NAFBlock, NAFTransform) live in
-``compressai/layers/lic/cca.py`` and the auxiliary CCA-loss entropy module
-lives in ``compressai/entropy_models/cca.py``. This module wires the
-NAFBlock-based analysis/synthesis pair to a 5-slice channel-conditional
-entropy model (with full previous-slice support) and an optional auxiliary
-entropy module that produces ``y_aux`` / ``y_cca`` likelihoods for
+The shared CCA NAF blocks (``_NAFBlock`` / ``_NAFTransform``) and the
+auxiliary CCA-loss entropy module both live in
+``compressai/entropy_models/cca.py``. This module wires the NAF-based
+analysis/synthesis pair to a 5-slice channel-conditional entropy model
+(with full previous-slice support) and an optional auxiliary entropy
+module that produces ``y_aux`` / ``y_cca`` likelihoods for
 ``CCARateDistortionLoss``.
 """
 from __future__ import annotations
@@ -25,8 +25,8 @@ import torch.nn as nn
 from torch import Tensor
 
 from compressai.entropy_models import EntropyBottleneck, GaussianConditional
+from compressai.entropy_models.cca import _NAFBlock, _NAFTransform
 from compressai.layers.lic.blocks import ResidualBottleneckBlock
-from compressai.layers.lic.cca import NAFBlock, NAFTransform
 from compressai.models.base import CompressionModel, get_scale_table
 from compressai.ops import quantize_ste
 from compressai.registry import register_model
@@ -103,7 +103,7 @@ class _CCAEncoder(nn.Module):
         self.blocks = nn.ModuleList(
             nn.Sequential(
                 *(ResidualBottleneckBlock(stage_dims[index], stage_dims[index]) for _ in range(3)),
-                *(NAFBlock(stage_dims[index]) for _ in range(stage_layers[index])),
+                *(_NAFBlock(stage_dims[index]) for _ in range(stage_layers[index])),
             )
             for index in range(self.depth)
         )
@@ -136,7 +136,7 @@ class _CCADecoder(nn.Module):
         )
         self.blocks = nn.ModuleList(
             nn.Sequential(
-                *(NAFBlock(stage_dims[index]) for _ in range(stage_layers[index])),
+                *(_NAFBlock(stage_dims[index]) for _ in range(stage_layers[index])),
                 *(ResidualBottleneckBlock(stage_dims[index], stage_dims[index]) for _ in range(3)),
             )
             for index in reversed(range(self.depth))
@@ -186,7 +186,7 @@ class _CCAAuxEntropyModel(nn.Module):
             return support_channels(index) + self.slice_sizes[index]
 
         self.mean_support_transforms = nn.ModuleList(
-            NAFTransform(
+            _NAFTransform(
                 support_channels(index),
                 support_channels(index),
                 self.hidden_channels,
@@ -195,7 +195,7 @@ class _CCAAuxEntropyModel(nn.Module):
             for index in range(self.num_slices)
         )
         self.scale_support_transforms = nn.ModuleList(
-            NAFTransform(
+            _NAFTransform(
                 support_channels(index),
                 support_channels(index),
                 self.hidden_channels,
@@ -344,7 +344,7 @@ class CCAModel(CompressionModel):
             return support_channels(index) + self.slice_sizes[index]
 
         self.mean_support_transforms = nn.ModuleList(
-            NAFTransform(
+            _NAFTransform(
                 support_channels(index),
                 support_channels(index),
                 self.em_hidden_channels,
@@ -353,7 +353,7 @@ class CCAModel(CompressionModel):
             for index in range(self.num_slices)
         )
         self.scale_support_transforms = nn.ModuleList(
-            NAFTransform(
+            _NAFTransform(
                 support_channels(index),
                 support_channels(index),
                 self.em_hidden_channels,

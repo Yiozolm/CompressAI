@@ -9,8 +9,9 @@ input and verifies the converted state dict is bit-equivalent to the
 upstream one (eval-mode ``x_hat`` diff = 0).
 
 The upstream-vs-compressai key differences are mechanical renames; the
-shared NAFBlock / NAFTransform classes already live in
-``compressai/layers/lic/cca.py``:
+shared NAFBlock / NAFTransform classes are private to
+``compressai/entropy_models/cca.py`` (used by both the CCA entropy model
+and ``compressai/models/cca.py``):
 
 - Top level: ``aux_entropymodel`` → ``aux_entropy_model``.
 - Anywhere: ``mean_NAF_transforms`` → ``mean_support_transforms``,

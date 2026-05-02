@@ -8,7 +8,8 @@ import torch.nn as nn
 from torch import Tensor
 
 from compressai.layers import conv
-from compressai.layers.lic.cca import NAFTransform
+from compressai.layers.layers import conv1x1
+from compressai.layers.lic.blocks import LayerNorm2d
 from compressai.ops import quantize_ste
 
 from .entropy_models import EntropyBottleneck, GaussianConditional
@@ -19,6 +20,97 @@ __all__ = [
     "infer_cca_hidden_channels",
     "infer_cca_num_layers",
 ]
+
+
+# ---------------------------------------------------------------------------
+# NAF (Non-linear Activation Free) building blocks
+# (formerly compressai/layers/lic/cca.py; private to the CCA model + entropy model)
+# ---------------------------------------------------------------------------
+
+
+class _SimpleGate(nn.Module):
+    def forward(self, input_tensor: Tensor) -> Tensor:
+        gate_tensor, value_tensor = input_tensor.chunk(2, dim=1)
+        return gate_tensor * value_tensor
+
+
+class _NAFBlock(nn.Module):
+    """Non-linear Activation Free residual block.
+
+    Used by both the CCA entropy-model auxiliary transforms and the CCA
+    image-compression model's analysis / synthesis stacks. State-dict keys
+    (``norm1`` / ``pointwise_depthwise`` / ``channel_attention`` / ``project``
+    / ``feed_forward`` / ``beta`` / ``gamma``) match upstream so released
+    checkpoints load 1:1.
+    """
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        expanded_channels = channels * 2
+        self.norm1 = LayerNorm2d(channels)
+        self.pointwise_depthwise = nn.Sequential(
+            conv1x1(channels, expanded_channels),
+            nn.Conv2d(
+                expanded_channels,
+                expanded_channels,
+                kernel_size=3,
+                padding=1,
+                groups=expanded_channels,
+            ),
+        )
+        self.gate = _SimpleGate()
+        self.channel_attention = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            conv1x1(channels, channels),
+        )
+        self.project = conv1x1(channels, channels)
+        self.norm2 = LayerNorm2d(channels)
+        self.feed_forward = nn.Sequential(
+            conv1x1(channels, expanded_channels),
+            _SimpleGate(),
+            conv1x1(channels, channels),
+        )
+        self.beta = nn.Parameter(torch.zeros(1, channels, 1, 1))
+        self.gamma = nn.Parameter(torch.zeros(1, channels, 1, 1))
+
+    def forward(self, input_tensor: Tensor) -> Tensor:
+        output = self.norm1(input_tensor)
+        output = self.pointwise_depthwise(output)
+        output = self.gate(output)
+        output = output * self.channel_attention(output)
+        output = self.project(output)
+        output = input_tensor + self.beta * output
+        return output + self.gamma * self.feed_forward(self.norm2(output))
+
+
+class _NAFTransform(nn.Module):
+    """``Conv1x1 -> NAFBlock x N -> Conv1x1`` per-slice support transform."""
+
+    def __init__(
+        self,
+        input_channels: int,
+        output_channels: int,
+        hidden_channels: int,
+        num_layers: int,
+    ) -> None:
+        super().__init__()
+        if num_layers < 1:
+            raise ValueError("num_layers must be positive")
+
+        self.input_projection = conv1x1(input_channels, hidden_channels)
+        self.blocks = nn.Sequential(
+            *(_NAFBlock(hidden_channels) for _ in range(num_layers))
+        )
+        self.output_projection = conv1x1(hidden_channels, output_channels)
+
+    def forward(self, input_tensor: Tensor) -> Tensor:
+        output = self.input_projection(input_tensor)
+        return self.output_projection(output + self.blocks(output))
+
+
+# ---------------------------------------------------------------------------
+# CCA entropy model
+# ---------------------------------------------------------------------------
 
 
 _CCA_PREFIX = "cca_aux_entropy_model."
@@ -104,7 +196,7 @@ class CausalContextAdjustmentEntropyModel(nn.Module):
             return self.latent_channels + self.slice_channels * max(index - 1, 0)
 
         self.mean_support_transforms = nn.ModuleList(
-            NAFTransform(
+            _NAFTransform(
                 support_channels(index),
                 support_channels(index),
                 self.hidden_channels,
@@ -113,7 +205,7 @@ class CausalContextAdjustmentEntropyModel(nn.Module):
             for index in range(self.num_slices)
         )
         self.scale_support_transforms = nn.ModuleList(
-            NAFTransform(
+            _NAFTransform(
                 support_channels(index),
                 support_channels(index),
                 self.hidden_channels,
