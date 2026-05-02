@@ -33,9 +33,10 @@ factor ``l`` ∈ [0, 1] that mixes between adjacent levels ``s`` and ``s+1``.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from compressai.entropy_models import GaussianConditional
-from compressai.layers import GDN, SFT
+from compressai.layers import GDN
 from compressai.registry import register_model
 
 from .base import get_scale_table
@@ -47,6 +48,39 @@ __all__ = [
     "GainedMSHyperprior",
     "SCGainedMSHyperprior",
 ]
+
+
+class _SFT(nn.Module):
+    """Spatially-adaptive feature transform (SPADE-style).
+
+    Predicts per-pixel ``(gamma, beta)`` from a conditioning map and applies
+    ``out = x * (1 + gamma) + beta``. The conditioning map is adaptive-avg-pooled
+    to ``x``'s spatial size, so resolution mismatches are tolerated.
+
+    Args:
+        x_nc: number of channels of the modulated feature ``x``.
+        prior_nc: number of channels of the conditioning map.
+        ks: kernel size for the gamma / beta predictor convs.
+        nhidden: hidden width of the shared MLP.
+    """
+
+    def __init__(self, x_nc: int, prior_nc: int = 1, ks: int = 3, nhidden: int = 128):
+        super().__init__()
+        pw = ks // 2
+
+        self.mlp_shared = nn.Sequential(
+            nn.Conv2d(prior_nc, nhidden, kernel_size=ks, padding=pw),
+            nn.ReLU(),
+        )
+        self.mlp_gamma = nn.Conv2d(nhidden, x_nc, kernel_size=ks, padding=pw)
+        self.mlp_beta = nn.Conv2d(nhidden, x_nc, kernel_size=ks, padding=pw)
+
+    def forward(self, x: torch.Tensor, qmap: torch.Tensor) -> torch.Tensor:
+        qmap = F.adaptive_avg_pool2d(qmap, x.size()[2:])
+        actv = self.mlp_shared(qmap)
+        gamma = self.mlp_gamma(actv)
+        beta = self.mlp_beta(actv)
+        return x * (1 + gamma) + beta
 
 
 # Default lambda set from the upstream implementation (HUAWEI CVPR 2021).
@@ -330,7 +364,7 @@ class SCGainedMSHyperprior(GainedMSHyperprior):
     r"""Spatial-channel gained MS hyperprior with SPADE-style SFT modulation.
 
     Adds an extra ``qmap`` (quality map) input that is fused into the encoder
-    via :class:`~compressai.layers.SFT` blocks at three intermediate stages,
+    via SPADE-style :class:`_SFT` blocks at three intermediate stages,
     and re-injected on the decoder side from the hyper-latent ``z_hat``. Used
     for spatially-varying rate control.
 
@@ -358,19 +392,19 @@ class SCGainedMSHyperprior(GainedMSHyperprior):
             nn.LeakyReLU(0.1, True),
             conv(N, N, kernel_size=1, stride=1),
         )
-        self.ga_SFT1 = SFT(N, prior_nc=N, ks=3)
+        self.ga_SFT1 = _SFT(N, prior_nc=N, ks=3)
         self.qmap_feature_ga2 = nn.Sequential(
             conv(N, N, kernel_size=3),
             nn.LeakyReLU(0.1, True),
             conv(N, N, kernel_size=1, stride=1),
         )
-        self.ga_SFT2 = SFT(N, prior_nc=N, ks=3)
+        self.ga_SFT2 = _SFT(N, prior_nc=N, ks=3)
         self.qmap_feature_ga3 = nn.Sequential(
             conv(N, N, kernel_size=3),
             nn.LeakyReLU(0.1, True),
             conv(N, N, kernel_size=1, stride=1),
         )
-        self.ga_SFT3 = SFT(N, prior_nc=N, ks=3)
+        self.ga_SFT3 = _SFT(N, prior_nc=N, ks=3)
 
         # ---- encoder backbone (4 stages) ----
         self.g_a1 = nn.Sequential(conv(3, N), GDN(N))
@@ -393,25 +427,25 @@ class SCGainedMSHyperprior(GainedMSHyperprior):
             nn.LeakyReLU(0.1, True),
             conv(N * 2, N, kernel_size=3, stride=1),
         )
-        self.gs_SFT0 = SFT(M, prior_nc=N, ks=3)
+        self.gs_SFT0 = _SFT(M, prior_nc=N, ks=3)
         self.qmap_feature_gs1 = nn.Sequential(
             deconv(N, N, kernel_size=3),
             nn.LeakyReLU(0.1, True),
             conv(N, N, kernel_size=1, stride=1),
         )
-        self.gs_SFT1 = SFT(N, prior_nc=N, ks=3)
+        self.gs_SFT1 = _SFT(N, prior_nc=N, ks=3)
         self.qmap_feature_gs2 = nn.Sequential(
             deconv(N, N, kernel_size=3),
             nn.LeakyReLU(0.1, True),
             conv(N, N, kernel_size=1, stride=1),
         )
-        self.gs_SFT2 = SFT(N, prior_nc=N, ks=3)
+        self.gs_SFT2 = _SFT(N, prior_nc=N, ks=3)
         self.qmap_feature_gs3 = nn.Sequential(
             deconv(N, N, kernel_size=3),
             nn.LeakyReLU(0.1, True),
             conv(N, N, kernel_size=1, stride=1),
         )
-        self.gs_SFT3 = SFT(N, prior_nc=N, ks=3)
+        self.gs_SFT3 = _SFT(N, prior_nc=N, ks=3)
 
         # ---- decoder backbone (4 stages) ----
         self.g_s1 = nn.Sequential(deconv(M, N), GDN(N, inverse=True))
