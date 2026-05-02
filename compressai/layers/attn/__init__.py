@@ -41,6 +41,7 @@ from .swin import (
 from .swin_attention import (
     WindowAttention,
     build_window_attention_mask,
+    pad_to_window_multiple,
     window_partition,
     window_reverse,
 )
@@ -79,6 +80,7 @@ __all__ = [
     "infer_swatten_attention_dim",
     "infer_swatten_head_dim",
     "infer_swatten_window_size",
+    "pad_to_window_multiple",
     "window_partition",
     "window_reverse",
 ]

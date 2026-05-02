@@ -12,8 +12,8 @@ from ..layers import conv1x1, conv3x3
 from ..attn.swin import PatchMerging, PatchSplit
 from ..attn.swin_attention import (
     WindowAttention,
-    _pad_to_window_size,
     build_window_attention_mask,
+    pad_to_window_multiple,
     window_partition,
     window_reverse,
 )
@@ -102,7 +102,7 @@ class STFWinBasedAttention(nn.Module):
 
     def forward(self, input_tensor: Tensor) -> Tensor:
         output = input_tensor.permute(0, 2, 3, 1).contiguous()
-        output, pad_height, pad_width = _pad_to_window_size(output, self.window_size)
+        output, pad_height, pad_width = pad_to_window_multiple(output, self.window_size, layout="BHWC")
         padded_height, padded_width = output.shape[1], output.shape[2]
 
         if self.shift_size > 0:
@@ -236,7 +236,7 @@ class STFSwinTransformerBlock(nn.Module):
 
         shortcut = input_tensor
         output = self.norm1(input_tensor).view(batch_size, height, width, channels)
-        output, pad_height, pad_width = _pad_to_window_size(output, self.window_size)
+        output, pad_height, pad_width = pad_to_window_multiple(output, self.window_size, layout="BHWC")
         padded_height, padded_width = output.shape[1], output.shape[2]
 
         if self.shift_size > 0:

@@ -12,6 +12,7 @@ from einops import rearrange
 from timm.layers import DropPath
 from torch import Tensor
 
+from ..attn.swin_attention import pad_to_window_multiple
 from ..layers import conv, conv1x1, conv3x3, deconv
 from .blocks import ResidualBottleneckBlock
 
@@ -29,18 +30,6 @@ __all__ = [
     "SpatialAttentionModule",
     "SwinBlockWithConvMulti",
 ]
-
-
-def _pad_to_window_multiple(
-    input_tensor: Tensor,
-    window_size: int,
-) -> Tuple[Tensor, int, int]:
-    _, _, height, width = input_tensor.shape
-    pad_height = (window_size - height % window_size) % window_size
-    pad_width = (window_size - width % window_size) % window_size
-    if pad_height == 0 and pad_width == 0:
-        return input_tensor, 0, 0
-    return F.pad(input_tensor, (0, pad_width, 0, pad_height)), pad_height, pad_width
 
 
 class ResidualBottleneckBlockWithStride(nn.Module):
@@ -325,7 +314,7 @@ class SwinBlockWithConvMulti(nn.Module):
         self.window_size = window_size
 
     def forward(self, input_tensor: Tensor) -> Tensor:
-        output, pad_height, pad_width = _pad_to_window_multiple(input_tensor, self.window_size)
+        output, pad_height, pad_width = pad_to_window_multiple(input_tensor, self.window_size)
         output = rearrange(output, "b c h w -> b h w c")
         for layer in self.layers:
             output = layer(output)

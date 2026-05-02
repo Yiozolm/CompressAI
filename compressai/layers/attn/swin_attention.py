@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -11,8 +11,8 @@ from torch import Tensor
 
 __all__ = [
     "WindowAttention",
-    "_pad_to_window_size",
     "build_window_attention_mask",
+    "pad_to_window_multiple",
     "window_partition",
     "window_reverse",
 ]
@@ -87,17 +87,48 @@ def build_window_attention_mask(
     return attention_mask.masked_fill(attention_mask == 0, float(0.0))
 
 
-def _pad_to_window_size(
+def pad_to_window_multiple(
     input_tensor: Tensor,
-    window_size: int,
+    window_size: Union[int, Tuple[int, int]],
+    *,
+    layout: str = "BCHW",
 ) -> Tuple[Tensor, int, int]:
-    _, height, width, _ = input_tensor.shape
-    pad_height = (window_size - height % window_size) % window_size
-    pad_width = (window_size - width % window_size) % window_size
-    if pad_height == 0 and pad_width == 0:
+    """Right/bottom-pad a 4D tensor so its spatial dims are multiples of
+    ``window_size``.
+
+    Args:
+        input_tensor: 4D tensor in either ``BCHW`` or ``BHWC`` layout.
+        window_size: ``int`` (square window) or ``(window_h, window_w)``.
+        layout: ``"BCHW"`` (default, PyTorch convention) or ``"BHWC"``
+            (Swin / FTIC token-major layout).
+
+    Returns:
+        ``(padded_tensor, pad_h, pad_w)``, where ``pad_h`` / ``pad_w`` are
+        the bottom / right padding widths added to the height / width
+        dimension respectively.
+    """
+    if isinstance(window_size, int):
+        win_h = win_w = int(window_size)
+    else:
+        win_h, win_w = (int(s) for s in window_size)
+
+    if layout == "BCHW":
+        height, width = input_tensor.shape[-2], input_tensor.shape[-1]
+    elif layout == "BHWC":
+        height, width = input_tensor.shape[1], input_tensor.shape[2]
+    else:
+        raise ValueError(f"layout must be 'BCHW' or 'BHWC', got {layout!r}")
+
+    pad_h = (win_h - height % win_h) % win_h
+    pad_w = (win_w - width % win_w) % win_w
+    if pad_h == 0 and pad_w == 0:
         return input_tensor, 0, 0
-    output = F.pad(input_tensor, (0, 0, 0, pad_width, 0, pad_height))
-    return output, pad_height, pad_width
+
+    if layout == "BCHW":
+        # F.pad on BCHW: (W_left, W_right, H_left, H_right)
+        return F.pad(input_tensor, (0, pad_w, 0, pad_h)), pad_h, pad_w
+    # F.pad on BHWC: (C_left, C_right, W_left, W_right, H_left, H_right)
+    return F.pad(input_tensor, (0, 0, 0, pad_w, 0, pad_h)), pad_h, pad_w
 
 
 class WindowAttention(nn.Module):

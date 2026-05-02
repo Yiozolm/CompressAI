@@ -12,8 +12,9 @@ from einops import rearrange
 from timm.layers import DropPath
 from torch import Tensor
 
+from ..attn.swin_attention import pad_to_window_multiple
 from .blocks import OLP, ResidualBottleneckBlock
-from .dcae import ConvolutionalGLU, Scale, _pad_to_window_multiple, conv
+from .dcae import ConvolutionalGLU, Scale, conv
 
 __all__ = [
     "AdaptiveFrequencyBlock",
@@ -273,7 +274,7 @@ class SpatialAttentionBlock(nn.Module):
         self.window_size = window_size
 
     def forward(self, input_tensor: Tensor) -> Tensor:
-        output, pad_height, pad_width = _pad_to_window_multiple(input_tensor, self.window_size)
+        output, pad_height, pad_width = pad_to_window_multiple(input_tensor, self.window_size)
         output = rearrange(output, "b c h w -> b h w c")
         for layer in self.layers:
             output = layer(output)

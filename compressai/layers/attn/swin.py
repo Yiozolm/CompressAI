@@ -12,8 +12,8 @@ from torch import Tensor
 from ..layers import AttentionBlock, ResidualBlock, conv1x1, conv3x3
 from .swin_attention import (
     WindowAttention,
-    _pad_to_window_size,
     build_window_attention_mask,
+    pad_to_window_multiple,
     window_partition,
     window_reverse,
 )
@@ -66,9 +66,10 @@ class WMSA(nn.Module):
 
     def forward(self, input_tensor: Tensor) -> Tensor:
         _, height, width, _ = input_tensor.shape
-        output, pad_height, pad_width = _pad_to_window_size(
+        output, pad_height, pad_width = pad_to_window_multiple(
             input_tensor,
             self.window_size,
+            layout="BHWC",
         )
         padded_height, padded_width = output.shape[1], output.shape[2]
 

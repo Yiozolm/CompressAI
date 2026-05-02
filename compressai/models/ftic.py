@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from timm.layers import DropPath, to_2tuple
 from torch import Tensor
@@ -16,6 +15,7 @@ from compressai.layers import (
     conv3x3,
     subpel_conv3x3,
 )
+from compressai.layers.attn.swin_attention import pad_to_window_multiple
 from compressai.registry import register_model
 
 from .base import CompressionModel
@@ -39,22 +39,6 @@ def _branch_window_size(split_size: int, branch_index: int) -> Tuple[int, int]:
     if branch_index == 3:
         return split_size * 2, max(1, split_size // 2)
     raise ValueError(f"Unsupported branch index: {branch_index}")
-
-
-def _pad_bhwc(
-    input_tensor: Tensor,
-    window_height: int,
-    window_width: int,
-) -> Tuple[Tensor, int, int]:
-    _, height, width, _ = input_tensor.shape
-    pad_height = (window_height - height % window_height) % window_height
-    pad_width = (window_width - width % window_width) % window_width
-    if pad_height == 0 and pad_width == 0:
-        return input_tensor, 0, 0
-
-    output = input_tensor.permute(0, 3, 1, 2).contiguous()
-    output = F.pad(output, (0, pad_width, 0, pad_height))
-    return output.permute(0, 2, 3, 1).contiguous(), pad_height, pad_width
 
 
 def _window_partition(
@@ -140,9 +124,15 @@ class BranchWindowAttention(nn.Module):
         _, _, height, width, channels = qkv.shape
         del spatial_size
         query, key, value = qkv[0], qkv[1], qkv[2]
-        query, pad_h, pad_w = _pad_bhwc(query, self.window_height, self.window_width)
-        key, _, _ = _pad_bhwc(key, self.window_height, self.window_width)
-        value, _, _ = _pad_bhwc(value, self.window_height, self.window_width)
+        query, pad_h, pad_w = pad_to_window_multiple(
+            query, (self.window_height, self.window_width), layout="BHWC"
+        )
+        key, _, _ = pad_to_window_multiple(
+            key, (self.window_height, self.window_width), layout="BHWC"
+        )
+        value, _, _ = pad_to_window_multiple(
+            value, (self.window_height, self.window_width), layout="BHWC"
+        )
         padded_height, padded_width = query.shape[1], query.shape[2]
 
         query = _window_partition(query, self.window_height, self.window_width)
@@ -227,7 +217,7 @@ class WindowFrequencyModulation(nn.Module):
     def forward(self, input_tensor: Tensor, height: int, width: int) -> Tensor:
         batch_size, _, channels = input_tensor.shape
         output = input_tensor.view(batch_size, height, width, channels)
-        output, pad_h, pad_w = _pad_bhwc(output, self.window_size, self.window_size)
+        output, pad_h, pad_w = pad_to_window_multiple(output, self.window_size, layout="BHWC")
         padded_height, padded_width = output.shape[1], output.shape[2]
         output = output.view(
             batch_size,
@@ -597,18 +587,6 @@ class FTICHyperSynthesisTransform(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-def _pad_to_window_multiple(
-    input_tensor: Tensor,
-    window_size: int,
-) -> Tuple[Tensor, int, int]:
-    _, _, height, width = input_tensor.shape
-    pad_height = (window_size - height % window_size) % window_size
-    pad_width = (window_size - width % window_size) % window_size
-    if pad_height == 0 and pad_width == 0:
-        return input_tensor, 0, 0
-    return F.pad(input_tensor, (0, pad_width, 0, pad_height)), pad_height, pad_width
-
-
 class MaskedSliceChannelAttention(nn.Module):
     def __init__(self, dim: int, slices: int = 12, num_heads: int = 8) -> None:
         super().__init__()
@@ -747,7 +725,7 @@ class TCABlock(nn.Module):
 
     def forward(self, input_tensor: Tensor) -> Tensor:
         residual = input_tensor
-        output, pad_h, pad_w = _pad_to_window_multiple(input_tensor, self.window_size)
+        output, pad_h, pad_w = pad_to_window_multiple(input_tensor, self.window_size)
         batch_size, channels, padded_height, padded_width = output.shape
         height_windows = padded_height // self.window_size
         width_windows = padded_width // self.window_size

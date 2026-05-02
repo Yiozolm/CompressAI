@@ -27,7 +27,7 @@ from compressai.layers import (
 )
 from compressai.layers.attn.swin_attention import (
     WindowAttention,
-    _pad_to_window_size,
+    pad_to_window_multiple,
     window_partition,
     window_reverse,
 )
@@ -425,7 +425,7 @@ class _CMICBlock(nn.Module):
     def _window_forward(self, input_tensor: Tensor, x_size: Tuple[int, int]) -> Tensor:
         height, width = x_size
         output = input_tensor.reshape(input_tensor.size(0), height, width, self.dim)
-        output, pad_height, pad_width = _pad_to_window_size(output, self.window_size)
+        output, pad_height, pad_width = pad_to_window_multiple(output, self.window_size, layout="BHWC")
         padded_height, padded_width = output.shape[1], output.shape[2]
         windows = window_partition(output, self.window_size)
         windows = windows.view(-1, self.window_size * self.window_size, self.dim)
