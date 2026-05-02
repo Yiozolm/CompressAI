@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from timm.layers import trunc_normal_
+from timm.layers import Mlp, trunc_normal_
 from torch import Tensor
 
 from .utils import (
@@ -31,31 +31,6 @@ def _pointwise_then_dwconv(dim: int) -> nn.Sequential:
         nn.Conv2d(dim, dim, kernel_size=1, stride=1, padding=0),
         nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim),
     )
-
-
-class MLP(nn.Module):
-    def __init__(
-        self,
-        in_dim: int,
-        hidden_dim: Optional[int] = None,
-        out_dim: Optional[int] = None,
-        act_layer: type[nn.Module] = nn.GELU,
-        drop: float = 0.0,
-    ) -> None:
-        super().__init__()
-        out_dim = out_dim or in_dim
-        hidden_dim = hidden_dim or in_dim
-        self.fc1 = nn.Linear(in_dim, hidden_dim)
-        self.act = act_layer()
-        self.fc2 = nn.Linear(hidden_dim, out_dim)
-        self.drop = nn.Dropout(drop)
-
-    def forward(self, input_tensor: Tensor) -> Tensor:
-        output = self.fc1(input_tensor)
-        output = self.act(output)
-        output = self.drop(output)
-        output = self.fc2(output)
-        return self.drop(output)
 
 
 class LocalContext(nn.Module):
@@ -92,10 +67,10 @@ class LocalContext(nn.Module):
         trunc_normal_(self.relative_position_table, std=0.02)
         self.softmax = nn.Softmax(dim=-1)
         self.proj = nn.Linear(dim * 2, dim * 2)
-        self.mlp = MLP(
-            in_dim=dim * 2,
-            hidden_dim=int(dim * 2 * mlp_ratio),
-            out_dim=dim * 2,
+        self.mlp = Mlp(
+            in_features=dim * 2,
+            hidden_features=int(dim * 2 * mlp_ratio),
+            out_features=dim * 2,
         )
         self.norm1 = nn.LayerNorm(dim)
         self.norm2 = nn.LayerNorm(dim * 2)
