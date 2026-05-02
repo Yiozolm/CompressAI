@@ -56,10 +56,11 @@ the library, ``K=3`` interprets ``scales/means/weights`` as
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from torch import Tensor
 
@@ -68,13 +69,139 @@ from compressai.entropy_models import (
     LearnedGaussianBottleneck,
 )
 from compressai.layers import MaskedConv2d
-from compressai.layers.lic import Conv2dUnfold, SearchTransfer
 from compressai.ops import quantize_ste
 from compressai.registry import register_module
 
 from .base import LatentCodec
 
 __all__ = ["RefAutoregressiveLatentCodec"]
+
+
+# ---------------------------------------------------------------------------
+# Search + masked-conv-on-unfolded-refs (formerly compressai/layers/lic/ref_search.py)
+# ---------------------------------------------------------------------------
+
+
+class _Conv2dUnfold(nn.Conv2d):
+    """Masked k x k convolution acting on already-unfolded references.
+
+    The trainable ``weight`` and the ``mask`` buffer share the same shape as a
+    standard :class:`nn.Conv2d`. The ``mask`` zeroes out the contribution of
+    the centre and below-centre kernel positions (mask type "A"), so the
+    masked conv only "sees" causal neighbours of each reference patch.
+    """
+
+    def __init__(self, mask: bool, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Buffer name 'mask' matches upstream so checkpoint keys load 1:1.
+        self.register_buffer("mask", self.weight.data.clone())
+        _, _, kH, kW = self.weight.size()
+        self.is_mask = bool(mask)
+        if mask:
+            self.mask.fill_(1)
+            self.mask[:, :, kH // 2, kW // 2 + 1 :] = 0
+            self.mask[:, :, kH // 2 + 1 :] = 0
+
+    def forward(self, x_unfold: Tensor, h: int, w: int) -> Tensor:  # type: ignore[override]
+        if self.is_mask:
+            self.weight.data *= self.mask
+        out_unfold = (
+            x_unfold.transpose(1, 2)
+            .matmul(self.weight.view(self.weight.size(0), -1).t())
+            .transpose(1, 2)
+        )
+        return F.fold(out_unfold, (h, w), (1, 1))
+
+    def forward_origin(self, x: Tensor) -> Tensor:
+        """Standard masked-conv forward (operates on dense feature maps)."""
+        if self.is_mask:
+            self.weight.data *= self.mask
+        return super().forward(x)
+
+
+class _SearchTransfer(nn.Module):
+    """Causal global-reference search + transfer.
+
+    For each spatial position the module finds the index of the most-similar
+    already-decoded location based on cosine similarity over masked k x k
+    patches, then gathers the corresponding patch and a per-position
+    probability tensor. Returns ``(S, U, ref_unfold, R_arg)`` where:
+
+    * ``S`` -- similarity score map ``(N, 1, H, W)``;
+    * ``U`` -- gathered probability ``(N, 1, H, W)``;
+    * ``ref_unfold`` -- gathered k x k patch unfolded ``(N, C * k * k, H * W)``,
+      ready to be consumed by :class:`_Conv2dUnfold`;
+    * ``R_arg`` -- argmax indices ``(N, H * W)``.
+    """
+
+    def __init__(self, channels: int, k: int = 3, split: int = 1) -> None:
+        super().__init__()
+        # Mask Type "A": zero out centre + lower-half so the search only
+        # references causal neighbours of each reference patch.
+        mask = torch.ones((channels // split, k, k))
+        mask[:, k // 2, k // 2 :] = 0
+        mask[:, k // 2 + 1 :, :] = 0
+        mask_unfold = F.unfold(mask.unsqueeze(0), kernel_size=(k, k), padding=0)
+        # Stored as a non-trainable Parameter (matches upstream key
+        # `search.mask_unfold` so converted checkpoints load by name).
+        self.mask_unfold = nn.Parameter(mask_unfold, requires_grad=False)
+        self.k = int(k)
+        self.split = int(split)
+
+    def forward(
+        self, y_hat: Tensor, y_prob: Tensor
+    ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+        k = self.k
+        n, c, h, w = y_hat.shape
+
+        unfold = F.unfold(y_hat, kernel_size=(k, k), padding=k // 2) * self.mask_unfold
+        unfold = F.normalize(unfold, dim=1)  # (N, C*k*k, H*W)
+        unfold_T = unfold.permute(0, 2, 1)  # (N, H*W, C*k*k)
+        R = torch.bmm(unfold_T, unfold)  # (N, H*W, H*W)
+
+        # Training: bidirectional reference (drop diagonal). Eval: causal only.
+        if self.training:
+            R = torch.triu(R, diagonal=1) + torch.tril(R, diagonal=-1)
+        else:
+            R = torch.triu(R, diagonal=1)
+
+        R_star, R_star_arg = torch.max(R, dim=1)  # (N, H*W)
+
+        y_hat_unfold = F.unfold(y_hat, kernel_size=(k, k), padding=k // 2)
+        ref_unfold = self._batch_index_select(y_hat_unfold, 2, R_star_arg)
+        unfold_prob = F.unfold(y_prob, kernel_size=(1, 1), padding=0)
+        U_unfold = self._batch_index_select(unfold_prob, 2, R_star_arg)
+
+        S = R_star.view(n, 1, h, w)
+        U = F.fold(U_unfold, output_size=(h, w), kernel_size=(1, 1), padding=0)
+
+        # First pixel has no causal reference; tag as zero/identity.
+        if not self.training:
+            S[:, :, 0, 0] = 1e-8
+            U[:, :, 0, 0] = 1e-8
+            ref_unfold[:, :, 0] = 0.0
+            R_star_arg[:, 0] = -1
+
+        S = torch.clamp(S, min=1e-8, max=1.0)
+        U = torch.clamp(U, min=1e-8, max=1.0)
+        return S, U, ref_unfold, R_star_arg
+
+    @staticmethod
+    def _batch_index_select(input_: Tensor, dim: int, index: Tensor) -> Tensor:
+        """Per-batch ``torch.gather`` along ``dim``."""
+        views = [input_.size(0)] + [
+            1 if i != dim else -1 for i in range(1, len(input_.size()))
+        ]
+        expanse = list(input_.size())
+        expanse[0] = -1
+        expanse[dim] = -1
+        index = index.view(views).expand(expanse)
+        return torch.gather(input_, dim, index)
+
+
+# ---------------------------------------------------------------------------
+# Latent codec
+# ---------------------------------------------------------------------------
 
 
 def _make_param_head(in_ch: int, hidden_ch: int, out_ch: int, bias: bool = True) -> nn.Sequential:
@@ -147,11 +274,11 @@ class RefAutoregressiveLatentCodec(LatentCodec):
         self.log_scale_min = float(log_scale_min)
         self._mixtures = 3  # local, ref, hyper
 
-        # Local context: 5×5 mask-A conv, M → 2M.
+        # Local context: 5x5 mask-A conv, M -> 2M.
         self.mask_conv = MaskedConv2d(M, 2 * M, 5, 1, 2, bias=bias, mask_type="A")
         # Global reference search and masked-conv on unfolded refs.
-        self.search = SearchTransfer(M, k=sk)
-        self.mask_conv_ref = Conv2dUnfold(True, M, 2 * M, sk, 1, sk // 2, bias=bias)
+        self.search = _SearchTransfer(M, k=sk)
+        self.mask_conv_ref = _Conv2dUnfold(True, M, 2 * M, sk, 1, sk // 2, bias=bias)
 
         out_ch = M * num_parameter  # one GMM component per cascade
         # Cascade 1: local only (input = 2M).
