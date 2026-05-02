@@ -7,7 +7,7 @@ from typing import Dict, Optional, Sequence, Tuple, Type
 import torch
 import torch.nn as nn
 
-from timm.layers import DropPath
+from timm.layers import DropPath, Mlp
 from torch import Tensor
 
 from compressai.layers import GDN, conv1x1, conv3x3, subpel_conv3x3
@@ -59,31 +59,6 @@ class _STFResidualUnit(nn.Module):
 
     def forward(self, input_tensor: Tensor) -> Tensor:
         return self.relu(self.conv(input_tensor) + input_tensor)
-
-
-class _STFMLP(nn.Module):
-    def __init__(
-        self,
-        in_features: int,
-        hidden_features: Optional[int] = None,
-        out_features: Optional[int] = None,
-        act_layer: Type[nn.Module] = nn.GELU,
-        drop: float = 0.0,
-    ) -> None:
-        super().__init__()
-        out_features = out_features or in_features
-        hidden_features = hidden_features or in_features
-        self.fc1 = nn.Linear(in_features, hidden_features)
-        self.act = act_layer()
-        self.fc2 = nn.Linear(hidden_features, out_features)
-        self.drop = nn.Dropout(drop)
-
-    def forward(self, input_tensor: Tensor) -> Tensor:
-        output = self.fc1(input_tensor)
-        output = self.act(output)
-        output = self.drop(output)
-        output = self.fc2(output)
-        return self.drop(output)
 
 
 class _STFWinBasedAttention(nn.Module):
@@ -234,7 +209,7 @@ class _STFSwinTransformerBlock(nn.Module):
         )
         self.drop_path = DropPath(drop_path) if drop_path > 0 else nn.Identity()
         self.norm2 = norm_layer(dim)
-        self.mlp = _STFMLP(
+        self.mlp = Mlp(
             in_features=dim,
             hidden_features=int(dim * mlp_ratio),
             act_layer=act_layer,
