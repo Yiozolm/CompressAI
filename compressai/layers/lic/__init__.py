@@ -11,7 +11,6 @@ from .balle2 import (
     Balle2Encoder,
     Balle2Upsample,
 )
-from .gsdn import GSDN
 from .ref_hyper import (
     RefHyperDecoder,
     RefHyperEncoder,
@@ -82,7 +81,6 @@ __all__ = [
     "DWConvResBlock",
     "GatedFFN",
     "GatedTransformCNN",
-    "GSDN",
     "HyperAnalysis",
     "HyperSynthesis",
     "InverseAdaptiveFrequencyBlock",

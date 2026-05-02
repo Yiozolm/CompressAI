@@ -47,6 +47,7 @@ from typing import Any, Dict
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from torch import Tensor
 
@@ -58,15 +59,102 @@ from compressai.latent_codecs import RefAutoregressiveLatentCodec
 from compressai.layers.lic import (
     Balle2Decoder,
     Balle2Encoder,
-    GSDN,
     RefHyperDecoder,
     RefHyperEncoder,
 )
+from compressai.ops.parametrizers import NonNegativeParametrizer
 from compressai.registry import register_model
 
 from .base import CompressionModel
 
 __all__ = ["RefBasedAR"]
+
+
+class _GSDN(nn.Module):
+    """Generalized Subtractive + Divisive Normalisation layer.
+
+    GSDN extends GDN with a per-channel learnable subtractive (mean) term
+    *before* the divisive (variance) normalisation::
+
+        y[i] = (x[i] - mu[i]) / sqrt(beta[i] + sum_j gamma[j, i] * (x[j] - mu[j])**2)
+
+    Only the divisive ``beta`` / ``gamma`` are reparametrised through
+    :class:`compressai.ops.parametrizers.NonNegativeParametrizer`; the
+    subtractive ``beta2`` / ``gamma2`` follow the same reparametrisation but
+    with a different positivity floor on ``beta2`` (zero by default upstream).
+
+    Module attribute names ``beta`` / ``gamma`` / ``beta2`` / ``gamma2`` and
+    init values are kept identical to upstream ``module/ops.py::GSDN`` so the
+    released checkpoints load 1:1.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        inverse: bool = False,
+        beta_min: float = 1e-6,
+        gamma_init: float = 0.1,
+    ) -> None:
+        super().__init__()
+        self.inverse = bool(inverse)
+
+        # Divisive (beta, gamma): identical to GDN.
+        self.beta_reparam = NonNegativeParametrizer(minimum=beta_min)
+        beta = torch.ones(in_channels)
+        beta = self.beta_reparam.init(beta)
+        self.beta = nn.Parameter(beta)
+
+        self.gamma_reparam = NonNegativeParametrizer()
+        gamma = gamma_init * torch.eye(in_channels)
+        gamma = self.gamma_reparam.init(gamma)
+        self.gamma = nn.Parameter(gamma)
+
+        # Subtractive (beta2, gamma2): upstream initialises beta2 to zeros.
+        self.beta2_reparam = NonNegativeParametrizer(minimum=beta_min)
+        beta2 = torch.zeros(in_channels)
+        beta2 = self.beta2_reparam.init(beta2)
+        self.beta2 = nn.Parameter(beta2)
+
+        self.gamma2_reparam = NonNegativeParametrizer()
+        gamma2 = gamma_init * torch.eye(in_channels)
+        gamma2 = self.gamma2_reparam.init(gamma2)
+        self.gamma2 = nn.Parameter(gamma2)
+
+    def _norm_params(self, beta_p, gamma_p, beta_repar, gamma_repar, C):
+        beta = beta_repar(beta_p)
+        gamma = gamma_repar(gamma_p)
+        gamma = gamma.reshape(C, C, 1, 1)
+        return beta, gamma
+
+    def forward(self, x: Tensor) -> Tensor:
+        _, C, _, _ = x.size()
+
+        if self.inverse:
+            # Decoder side: inverse divisive (multiply) then add learned mean.
+            beta, gamma = self._norm_params(
+                self.beta, self.gamma, self.beta_reparam, self.gamma_reparam, C
+            )
+            norm = torch.sqrt(F.conv2d(x**2, gamma, beta))
+            x = x * norm
+
+            beta2, gamma2 = self._norm_params(
+                self.beta2, self.gamma2, self.beta2_reparam, self.gamma2_reparam, C
+            )
+            mean = F.conv2d(x, gamma2, beta2)
+            return x + mean
+
+        # Encoder side: subtract learned mean then divisive normalise.
+        beta2, gamma2 = self._norm_params(
+            self.beta2, self.gamma2, self.beta2_reparam, self.gamma2_reparam, C
+        )
+        mean = F.conv2d(x, gamma2, beta2)
+        x = x - mean
+
+        beta, gamma = self._norm_params(
+            self.beta, self.gamma, self.beta_reparam, self.gamma_reparam, C
+        )
+        norm = torch.rsqrt(F.conv2d(x**2, gamma, beta))
+        return x * norm
 
 
 @register_model("qian2021-ref")
@@ -121,7 +209,7 @@ class RefBasedAR(CompressionModel):
 
         from compressai.layers.gdn import GDN as _GDN
 
-        norm_cls = GSDN if norm == "GSDN" else _GDN
+        norm_cls = _GSDN if norm == "GSDN" else _GDN
 
         self.N = int(N)
         self.M = int(M)
