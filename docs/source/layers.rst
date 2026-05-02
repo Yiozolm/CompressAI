@@ -173,12 +173,6 @@ compressai.layers.lic
 .. autoclass:: ConvolutionalGLU
 .. autoclass:: MutiScaleDictionaryCrossAttentionGLU
 .. autoclass:: SwinBlockWithConvMulti
-.. autoclass:: SpatialAttentionBlock
-.. autoclass:: SpatialAttentionLayer
-.. autoclass:: AdaptiveFrequencyBlock
-.. autoclass:: InverseAdaptiveFrequencyBlock
-.. autoclass:: DenoisingAsRegularizer
-.. autoclass:: CrossSparseWindowAttention
 .. autoclass:: CouplingLayer
 .. autoclass:: InvertibleConv1x1
 .. autoclass:: SqueezeLayer
