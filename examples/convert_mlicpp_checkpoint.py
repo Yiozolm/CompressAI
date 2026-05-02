@@ -19,7 +19,7 @@ The upstream-vs-compressai key differences are minimal:
   hyperprior + multi-reference checkerboard channel-slice entropy model is
   factored out as ``MLICPlusPlusLatentCodec``.
 - ``g_a`` / ``g_s`` keys (``analysis_transform.*`` / ``synthesis_transform.*``)
-  are unchanged: the compressai ``GeluResidualBlock*`` blocks share parameter
+  are unchanged: the compressai ``ResidualBlock*(act=nn.GELU())`` blocks share parameter
   names (``conv1`` / ``conv2`` / ``gdn`` / ``skip`` / ``subpel_conv`` /
   ``conv`` / ``igdn`` / ``upsample``) with the upstream
   ``ResidualBlockWithStride`` / ``ResidualBlock`` / ``ResidualBlockUpsample``.

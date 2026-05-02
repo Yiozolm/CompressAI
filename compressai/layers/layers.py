@@ -29,7 +29,7 @@
 
 import math
 
-from typing import Any, Tuple
+from typing import Any, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -265,12 +265,22 @@ class ResidualBlockWithStride(nn.Module):
         in_ch (int): number of input channels
         out_ch (int): number of output channels
         stride (int): stride value (default: 2)
+        act (nn.Module, optional): activation module instance. Defaults to
+            ``nn.LeakyReLU(inplace=True)``. Pass e.g. ``nn.GELU()`` to swap
+            the activation without subclassing.
     """
 
-    def __init__(self, in_ch: int, out_ch: int, stride: int = 2):
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        stride: int = 2,
+        *,
+        act: Optional[nn.Module] = None,
+    ):
         super().__init__()
         self.conv1 = conv3x3(in_ch, out_ch, stride=stride)
-        self.leaky_relu = nn.LeakyReLU(inplace=True)
+        self.act = act if act is not None else nn.LeakyReLU(inplace=True)
         self.conv2 = conv3x3(out_ch, out_ch)
         self.gdn = GDN(out_ch)
         if stride != 1 or in_ch != out_ch:
@@ -281,7 +291,7 @@ class ResidualBlockWithStride(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         identity = x
         out = self.conv1(x)
-        out = self.leaky_relu(out)
+        out = self.act(out)
         out = self.conv2(out)
         out = self.gdn(out)
 
@@ -299,12 +309,22 @@ class ResidualBlockUpsample(nn.Module):
         in_ch (int): number of input channels
         out_ch (int): number of output channels
         upsample (int): upsampling factor (default: 2)
+        act (nn.Module, optional): activation module instance. Defaults to
+            ``nn.LeakyReLU(inplace=True)``. Pass e.g. ``nn.GELU()`` to swap
+            the activation without subclassing.
     """
 
-    def __init__(self, in_ch: int, out_ch: int, upsample: int = 2):
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        upsample: int = 2,
+        *,
+        act: Optional[nn.Module] = None,
+    ):
         super().__init__()
         self.subpel_conv = subpel_conv3x3(in_ch, out_ch, upsample)
-        self.leaky_relu = nn.LeakyReLU(inplace=True)
+        self.act = act if act is not None else nn.LeakyReLU(inplace=True)
         self.conv = conv3x3(out_ch, out_ch)
         self.igdn = GDN(out_ch, inverse=True)
         self.upsample = subpel_conv3x3(in_ch, out_ch, upsample)
@@ -312,7 +332,7 @@ class ResidualBlockUpsample(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         identity = x
         out = self.subpel_conv(x)
-        out = self.leaky_relu(out)
+        out = self.act(out)
         out = self.conv(out)
         out = self.igdn(out)
         identity = self.upsample(x)
@@ -326,12 +346,21 @@ class ResidualBlock(nn.Module):
     Args:
         in_ch (int): number of input channels
         out_ch (int): number of output channels
+        act (nn.Module, optional): activation module instance, applied after
+            both convolutions. Defaults to ``nn.LeakyReLU(inplace=True)``.
+            Pass e.g. ``nn.GELU()`` to swap the activation without subclassing.
     """
 
-    def __init__(self, in_ch: int, out_ch: int):
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        *,
+        act: Optional[nn.Module] = None,
+    ):
         super().__init__()
         self.conv1 = conv3x3(in_ch, out_ch)
-        self.leaky_relu = nn.LeakyReLU(inplace=True)
+        self.act = act if act is not None else nn.LeakyReLU(inplace=True)
         self.conv2 = conv3x3(out_ch, out_ch)
         if in_ch != out_ch:
             self.skip = conv1x1(in_ch, out_ch)
@@ -342,9 +371,9 @@ class ResidualBlock(nn.Module):
         identity = x
 
         out = self.conv1(x)
-        out = self.leaky_relu(out)
+        out = self.act(out)
         out = self.conv2(out)
-        out = self.leaky_relu(out)
+        out = self.act(out)
 
         if self.skip is not None:
             identity = self.skip(x)

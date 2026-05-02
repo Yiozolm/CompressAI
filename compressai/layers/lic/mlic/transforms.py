@@ -7,7 +7,13 @@ import torch.nn as nn
 
 from torch import Tensor
 
-from compressai.layers import GDN, conv1x1, conv3x3, subpel_conv3x3
+from compressai.layers import (
+    ResidualBlock,
+    ResidualBlockUpsample,
+    ResidualBlockWithStride,
+    conv3x3,
+    subpel_conv3x3,
+)
 
 __all__ = [
     "AnalysisTransform",
@@ -19,68 +25,16 @@ __all__ = [
 ]
 
 
-class GeluResidualBlockWithStride(nn.Module):
-    def __init__(self, in_ch: int, out_ch: int, stride: int = 2) -> None:
-        super().__init__()
-        self.conv1 = conv3x3(in_ch, out_ch, stride=stride)
-        self.act = nn.GELU()
-        self.conv2 = conv3x3(out_ch, out_ch)
-        self.gdn = GDN(out_ch)
-        self.skip = conv1x1(in_ch, out_ch, stride=stride) if stride != 1 or in_ch != out_ch else None
-
-    def forward(self, input_tensor: Tensor) -> Tensor:
-        identity = input_tensor if self.skip is None else self.skip(input_tensor)
-        output = self.conv1(input_tensor)
-        output = self.act(output)
-        output = self.conv2(output)
-        output = self.gdn(output)
-        return output + identity
-
-
-class GeluResidualBlockUpsample(nn.Module):
-    def __init__(self, in_ch: int, out_ch: int, upsample: int = 2) -> None:
-        super().__init__()
-        self.subpel_conv = subpel_conv3x3(in_ch, out_ch, upsample)
-        self.act = nn.GELU()
-        self.conv = conv3x3(out_ch, out_ch)
-        self.igdn = GDN(out_ch, inverse=True)
-        self.upsample = subpel_conv3x3(in_ch, out_ch, upsample)
-
-    def forward(self, input_tensor: Tensor) -> Tensor:
-        output = self.subpel_conv(input_tensor)
-        output = self.act(output)
-        output = self.conv(output)
-        output = self.igdn(output)
-        return output + self.upsample(input_tensor)
-
-
-class GeluResidualBlock(nn.Module):
-    def __init__(self, in_ch: int, out_ch: int) -> None:
-        super().__init__()
-        self.conv1 = conv3x3(in_ch, out_ch)
-        self.act = nn.GELU()
-        self.conv2 = conv3x3(out_ch, out_ch)
-        self.skip = conv1x1(in_ch, out_ch) if in_ch != out_ch else None
-
-    def forward(self, input_tensor: Tensor) -> Tensor:
-        identity = input_tensor if self.skip is None else self.skip(input_tensor)
-        output = self.conv1(input_tensor)
-        output = self.act(output)
-        output = self.conv2(output)
-        output = self.act(output)
-        return output + identity
-
-
 class AnalysisTransform(nn.Module):
     def __init__(self, N: int, M: int) -> None:
         super().__init__()
         self.analysis_transform = nn.Sequential(
-            GeluResidualBlockWithStride(3, N, stride=2),
-            GeluResidualBlock(N, N),
-            GeluResidualBlockWithStride(N, N, stride=2),
-            GeluResidualBlock(N, N),
-            GeluResidualBlockWithStride(N, N, stride=2),
-            GeluResidualBlock(N, N),
+            ResidualBlockWithStride(3, N, stride=2, act=nn.GELU()),
+            ResidualBlock(N, N, act=nn.GELU()),
+            ResidualBlockWithStride(N, N, stride=2, act=nn.GELU()),
+            ResidualBlock(N, N, act=nn.GELU()),
+            ResidualBlockWithStride(N, N, stride=2, act=nn.GELU()),
+            ResidualBlock(N, N, act=nn.GELU()),
             conv3x3(N, M, stride=2),
         )
 
@@ -134,13 +88,13 @@ class SynthesisTransform(nn.Module):
     def __init__(self, N: int, M: int) -> None:
         super().__init__()
         self.synthesis_transform = nn.Sequential(
-            GeluResidualBlock(M, M),
-            GeluResidualBlockUpsample(M, N, 2),
-            GeluResidualBlock(N, N),
-            GeluResidualBlockUpsample(N, N, 2),
-            GeluResidualBlock(N, N),
-            GeluResidualBlockUpsample(N, N, 2),
-            GeluResidualBlock(N, N),
+            ResidualBlock(M, M, act=nn.GELU()),
+            ResidualBlockUpsample(M, N, 2, act=nn.GELU()),
+            ResidualBlock(N, N, act=nn.GELU()),
+            ResidualBlockUpsample(N, N, 2, act=nn.GELU()),
+            ResidualBlock(N, N, act=nn.GELU()),
+            ResidualBlockUpsample(N, N, 2, act=nn.GELU()),
+            ResidualBlock(N, N, act=nn.GELU()),
             subpel_conv3x3(N, 3, 2),
         )
 
