@@ -45,14 +45,6 @@ from .saaf import (
     SpatialAttentionBlock,
     SpatialAttentionLayer,
 )
-from .shift import (
-    CheapCS1,
-    CheapChannelV1,
-    ResidualBlockShift,
-    ResidualShiftStack,
-    Shift4,
-    channel_shuffle,
-)
 from .mlic import (
     AnalysisTransform,
     ChannelContext,
@@ -109,11 +101,5 @@ __all__ = [
     "SwinBlockWithConvMulti",
     "SynthesisTransform",
     "ChannelContext",
-    "channel_shuffle",
-    "CheapCS1",
-    "CheapChannelV1",
     "EntropyParameters",
-    "ResidualBlockShift",
-    "ResidualShiftStack",
-    "Shift4",
 ]

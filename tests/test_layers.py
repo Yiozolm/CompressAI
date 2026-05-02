@@ -34,19 +34,21 @@ from compressai.layers import (
     GDN,
     GDN1,
     AttentionBlock,
-    CheapCS1,
     MaskedConv2d,
     MultistageMaskedConv2d,
     QReLU,
     GatedTransformCNN,
     LayerNorm2d,
     ResidualBlock,
-    ResidualBlockShift,
     ResidualBottleneckBlock,
     ResidualBlockUpsample,
     ResidualBlockWithStride,
-    ResidualShiftStack,
-    Shift4,
+)
+from compressai.models.shiftlic import (
+    _CheapCS1 as CheapCS1,
+    _ResidualBlockShift as ResidualBlockShift,
+    _ResidualShiftStack as ResidualShiftStack,
+    _Shift4 as Shift4,
 )
 from compressai.ops import (
     demultiplex,

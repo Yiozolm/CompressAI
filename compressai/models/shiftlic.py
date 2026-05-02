@@ -26,23 +26,208 @@ from typing import Any, Dict, List, Literal, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from torch import Tensor
 from torch.nn import init
 
 from compressai.entropy_models import EntropyBottleneck, GaussianConditional
 from compressai.latent_codecs import MultistageCheckerboardLatentCodec
-from compressai.layers import (
-    CheapCS1,
-    ResidualBlockShift,
-    ResidualShiftStack,
-)
 from compressai.models.base import CompressionModel
 from compressai.ops import quantize_ste
 from compressai.registry import register_model
 
 
 __all__ = ["ShiftLIC"]
+
+
+# ---------------------------------------------------------------------------
+# Shift building blocks (formerly compressai/layers/lic/shift.py)
+# ---------------------------------------------------------------------------
+
+
+def _default_init_conv(module_list, scale: float = 0.1, bias_fill: float = 0.0) -> None:
+    """Match upstream's per-conv Kaiming init scaled for residual blocks."""
+    if not isinstance(module_list, (list, tuple)):
+        module_list = [module_list]
+    for module in module_list:
+        for m in module.modules():
+            if isinstance(m, nn.Conv2d):
+                init.kaiming_normal_(m.weight)
+                m.weight.data *= scale
+                if m.bias is not None:
+                    m.bias.data.fill_(bias_fill)
+
+
+class _Shift4(nn.Module):
+    """Four-direction channel-grouped shift (up / down / left / right)."""
+
+    def __init__(
+        self,
+        groups: int = 4,
+        stride: int = 1,
+        mode: str = "constant",
+    ) -> None:
+        super().__init__()
+        self.g = int(groups)
+        self.stride = int(stride)
+        self.mode = mode
+
+    def forward(self, x: Tensor) -> Tensor:
+        b, c, h, w = x.shape
+        assert c == self.g * 4, (
+            f"_Shift4 expects channels = 4 * groups; got C={c}, groups={self.g}"
+        )
+
+        pad_x = F.pad(x, [self.stride] * 4, mode=self.mode)
+        out = torch.zeros_like(x)
+        cx = cy = self.stride
+        s = self.stride
+        out[:, 0 * self.g : 1 * self.g] = pad_x[
+            :, 0 * self.g : 1 * self.g, cx - s : cx - s + h, cy : cy + w
+        ]
+        out[:, 1 * self.g : 2 * self.g] = pad_x[
+            :, 1 * self.g : 2 * self.g, cx + s : cx + s + h, cy : cy + w
+        ]
+        out[:, 2 * self.g : 3 * self.g] = pad_x[
+            :, 2 * self.g : 3 * self.g, cx : cx + h, cy - s : cy - s + w
+        ]
+        out[:, 3 * self.g : 4 * self.g] = pad_x[
+            :, 3 * self.g : 4 * self.g, cx : cx + h, cy + s : cy + s + w
+        ]
+        return out
+
+
+class _ResidualBlockShift(nn.Module):
+    """1x1 conv -> ReLU -> _Shift4 -> 1x1 conv, with a 1x1 skip if needed."""
+
+    def __init__(
+        self,
+        in_feat: int,
+        out_feat: int,
+        res_scale: float = 1.0,
+        pytorch_init: bool = False,
+    ) -> None:
+        super().__init__()
+        self.res_scale = res_scale
+        self.conv1 = nn.Conv2d(in_feat, in_feat, kernel_size=1)
+        self.conv2 = nn.Conv2d(in_feat, out_feat, kernel_size=1)
+        self.relu = nn.ReLU(inplace=True)
+        self.shift = _Shift4(groups=in_feat // 4, stride=1)
+
+        if not pytorch_init:
+            _default_init_conv([self.conv1, self.conv2], scale=0.1)
+
+        if in_feat != out_feat:
+            self.skip = nn.Conv2d(in_feat, out_feat, kernel_size=1)
+        else:
+            self.skip = nn.Identity()
+
+    def forward(self, x: Tensor) -> Tensor:
+        identity = self.skip(x)
+        out = self.conv2(self.shift(self.relu(self.conv1(x))))
+        return identity + out * self.res_scale
+
+
+def _channel_shuffle(x: Tensor, groups: int) -> Tensor:
+    """Pixel-shuffle-style channel permutation used by _CheapChannelV1."""
+    batch, channels, height, width = x.size()
+    assert channels % groups == 0, (
+        f"channels ({channels}) must be divisible by groups ({groups})"
+    )
+    channels_per_group = channels // groups
+    x = x.view(batch, groups, channels_per_group, height, width)
+    x = x.transpose(1, 2).contiguous()
+    return x.view(batch, -1, height, width)
+
+
+class _CheapChannelV1(nn.Module):
+    """Multi-resolution depthwise context fused via channel-shuffled 1x1s."""
+
+    def __init__(self, dim: int, n_levels: int = 4) -> None:
+        super().__init__()
+        self.n_levels = n_levels
+        chunk_dim = dim // n_levels
+
+        self.mfr = nn.ModuleList(
+            [
+                nn.Conv2d(
+                    chunk_dim, chunk_dim, 3, 1, 1, groups=chunk_dim
+                )
+                for _ in range(n_levels)
+            ]
+        )
+        self.act = nn.GELU()
+        self.fusion1 = nn.Conv2d(chunk_dim * 2, chunk_dim * 2, 1)
+        self.fusion2 = nn.Conv2d(chunk_dim * 3, chunk_dim * 3, 1)
+        self.fusion3 = nn.Conv2d(chunk_dim * 4, chunk_dim * 4, 1)
+
+    def forward(self, x: Tensor) -> Tensor:
+        h, w = x.size()[-2:]
+        xc = x.chunk(self.n_levels, dim=1)
+        s = []
+        for i in range(self.n_levels):
+            if i > 0:
+                p_size = (h // 2**i, w // 2**i)
+                t = F.adaptive_max_pool2d(xc[i], p_size)
+                t = self.mfr[i](t)
+                t = F.interpolate(t, size=(h, w), mode="nearest")
+            else:
+                t = self.mfr[i](xc[i])
+            s.append(t)
+
+        res1 = self.fusion1(_channel_shuffle(torch.cat([s[0], s[1]], dim=1), 8))
+        res2 = self.fusion2(_channel_shuffle(torch.cat([res1, s[2]], dim=1), 8))
+        res3 = self.fusion3(_channel_shuffle(torch.cat([res2, s[3]], dim=1), 8))
+        return self.act(res3) * x
+
+
+class _CheapCS1(nn.Module):
+    """Cheap Spatial-Channel attention used in ShiftLIC middle/large."""
+
+    def __init__(self, dim: int, n_levels: int = 4) -> None:
+        del n_levels  # kept for signature parity with upstream
+        super().__init__()
+        self.CheapChannel = _CheapChannelV1(dim)
+        self.CheapSpatial = nn.Sequential(
+            _ResidualBlockShift(dim, dim * 2),
+            nn.GELU(),
+            nn.Conv2d(dim * 2, dim, 1, bias=False),
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        y = self.CheapChannel(x) + x
+        y = self.CheapSpatial(y) + y
+        return y
+
+
+def _ResidualShiftStack(in_ch: int, out_ch: int) -> nn.Module:
+    """ShiftLIC large's ``cc_transform`` factory.
+
+    Seven-module sequential ``_ResidualBlockShift x 5`` interleaved with two
+    ``GELU``s. The first block ramps ``in_ch -> out_ch // 2``, the inner
+    blocks stay at ``out_ch // 2``, and the final block doubles to
+    ``out_ch`` (the codec consumes ``2 * slice_size`` scale+mean channels).
+
+    Pass to
+    :class:`compressai.latent_codecs.MultistageCheckerboardLatentCodec` as
+    ``make_cc_transform``.
+    """
+    if out_ch % 2 != 0:
+        raise ValueError(
+            "_ResidualShiftStack expects out_ch to be even (codec passes "
+            "2*slice_size); got {out_ch}"
+        )
+    inner = out_ch // 2
+    return nn.Sequential(
+        _ResidualBlockShift(in_ch, inner),
+        _ResidualBlockShift(inner, inner),
+        nn.GELU(),
+        _ResidualBlockShift(inner, inner),
+        _ResidualBlockShift(inner, inner),
+        nn.GELU(),
+        _ResidualBlockShift(inner, out_ch),
+    )
 
 
 _VARIANTS = ("small", "middle", "large")
@@ -97,7 +282,7 @@ class ShiftLIC(CompressionModel):
                 hyper_channels=2 * M,
                 num_iters=4,
                 gamma_mode="linear",
-                make_cc_transform=ResidualShiftStack,
+                make_cc_transform=_ResidualShiftStack,
             )
             # Do NOT alias ``self.latent_codec.gaussian_conditional`` to a
             # top-level attribute: nn.Module would then emit duplicate
@@ -119,28 +304,28 @@ class ShiftLIC(CompressionModel):
         layers: List[nn.Module] = [
             nn.PixelUnshuffle(2),
             nn.Conv2d(12, 128, kernel_size=1, stride=1, padding=0),
-            ResidualBlockShift(128, 128),
-            ResidualBlockShift(128, 128),
-            ResidualBlockShift(128, 128),
+            _ResidualBlockShift(128, 128),
+            _ResidualBlockShift(128, 128),
+            _ResidualBlockShift(128, 128),
             nn.PixelUnshuffle(2),
             nn.Conv2d(128 * 4, 192, kernel_size=1, stride=1, padding=0),
-            ResidualBlockShift(192, 192),
-            ResidualBlockShift(192, 192),
-            ResidualBlockShift(192, 192),
+            _ResidualBlockShift(192, 192),
+            _ResidualBlockShift(192, 192),
+            _ResidualBlockShift(192, 192),
         ]
         if with_cs:
-            layers.append(CheapCS1(192))
+            layers.append(_CheapCS1(192))
         layers.extend(
             [
                 nn.PixelUnshuffle(2),
                 nn.Conv2d(192 * 4, 256, kernel_size=1, stride=1, padding=0),
-                ResidualBlockShift(256, 256),
-                ResidualBlockShift(256, 256),
-                ResidualBlockShift(256, 256),
+                _ResidualBlockShift(256, 256),
+                _ResidualBlockShift(256, 256),
+                _ResidualBlockShift(256, 256),
             ]
         )
         if with_cs:
-            layers.append(CheapCS1(256))
+            layers.append(_CheapCS1(256))
         layers.extend(
             [
                 nn.PixelUnshuffle(2),
@@ -156,28 +341,28 @@ class ShiftLIC(CompressionModel):
             nn.PixelShuffle(2),
         ]
         if with_cs:
-            layers.append(CheapCS1(256))
+            layers.append(_CheapCS1(256))
         layers.extend(
             [
-                ResidualBlockShift(256, 256),
-                ResidualBlockShift(256, 256),
-                ResidualBlockShift(256, 256),
+                _ResidualBlockShift(256, 256),
+                _ResidualBlockShift(256, 256),
+                _ResidualBlockShift(256, 256),
                 nn.Conv2d(256, 192 * 4, kernel_size=1, stride=1, padding=0),
                 nn.PixelShuffle(2),
             ]
         )
         if with_cs:
-            layers.append(CheapCS1(192))
+            layers.append(_CheapCS1(192))
         layers.extend(
             [
-                ResidualBlockShift(192, 192),
-                ResidualBlockShift(192, 192),
-                ResidualBlockShift(192, 192),
+                _ResidualBlockShift(192, 192),
+                _ResidualBlockShift(192, 192),
+                _ResidualBlockShift(192, 192),
                 nn.Conv2d(192, 128 * 4, kernel_size=1, stride=1, padding=0),
                 nn.PixelShuffle(2),
-                ResidualBlockShift(128, 128),
-                ResidualBlockShift(128, 128),
-                ResidualBlockShift(128, 128),
+                _ResidualBlockShift(128, 128),
+                _ResidualBlockShift(128, 128),
+                _ResidualBlockShift(128, 128),
                 nn.Conv2d(128, 12, kernel_size=1, stride=1, padding=0),
                 nn.PixelShuffle(2),
             ]
@@ -187,14 +372,14 @@ class ShiftLIC(CompressionModel):
     @staticmethod
     def _build_hyperencoder(M: int, N: int) -> nn.Sequential:
         return nn.Sequential(
-            ResidualBlockShift(M, N),
+            _ResidualBlockShift(M, N),
             nn.LeakyReLU(inplace=True),
-            ResidualBlockShift(N, N),
+            _ResidualBlockShift(N, N),
             nn.LeakyReLU(inplace=True),
             nn.PixelUnshuffle(2),
             nn.Conv2d(N * 4, N, kernel_size=1, stride=1, padding=0),
             nn.LeakyReLU(inplace=True),
-            ResidualBlockShift(N, N),
+            _ResidualBlockShift(N, N),
             nn.LeakyReLU(inplace=True),
             nn.PixelUnshuffle(2),
             nn.Conv2d(N * 4, N, kernel_size=1, stride=1, padding=0),
@@ -203,17 +388,17 @@ class ShiftLIC(CompressionModel):
     @staticmethod
     def _build_hyperdecoder(M: int, N: int, out_ch: int) -> nn.Sequential:
         return nn.Sequential(
-            ResidualBlockShift(N, N),
+            _ResidualBlockShift(N, N),
             nn.LeakyReLU(inplace=True),
             nn.Conv2d(N, N * 4, kernel_size=1, stride=1, padding=0),
             nn.PixelShuffle(2),
             nn.LeakyReLU(inplace=True),
-            ResidualBlockShift(N, N),
+            _ResidualBlockShift(N, N),
             nn.LeakyReLU(inplace=True),
             nn.Conv2d(N, N * 4, kernel_size=1, stride=1, padding=0),
             nn.PixelShuffle(2),
             nn.LeakyReLU(inplace=True),
-            ResidualBlockShift(N, out_ch),
+            _ResidualBlockShift(N, out_ch),
         )
 
     # ------------------------------------------------------------------

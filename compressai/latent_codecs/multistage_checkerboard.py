@@ -121,7 +121,7 @@ class MultistageCheckerboardLatentCodec(LatentCodec):
             ``"linear"`` (ShiftLIC). See :func:`gamma_func`.
         make_cc_transform: Factory ``(in_ch, out_ch) -> nn.Module`` building
             one cc_transform. Defaults to TinyLIC's conv stack; pass
-            :class:`compressai.layers.lic.shift.ResidualShiftStack` for
+            :func:`compressai.models.shiftlic._ResidualShiftStack` for
             ShiftLIC large.
         mask_kernel_sizes: Kernel sizes for the five
             ``MultistageMaskedConv2d`` instances ``sc_transform_{1..5}``.
