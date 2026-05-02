@@ -33,12 +33,105 @@ from torch import Tensor
 from compressai.entropy_models import GeneralizedGaussianConditional
 from compressai.latent_codecs import HierarchicalProgressiveLatentCodec
 from compressai.layers.attn import WindowedCrossAttention
-from compressai.layers.lic import DWConvResBlock, PConvResBlock
 from compressai.registry import register_model
 
 from .base import CompressionModel
 
 __all__ = ["HPCM", "convert_upstream_state_dict"]
+
+
+# ----------------------------------------------------------------------------
+# HPCM building blocks
+# (formerly compressai/layers/lic/hpcm.py; private to the HPCM model)
+# ----------------------------------------------------------------------------
+
+
+class _PartialConv3x3(nn.Module):
+    """3x3 conv applied only to the first ``partial_channels`` channels.
+
+    The remaining channels are passed through unchanged. Used as the spatial
+    mixer in HPCM's ``_PConvResBlock``.
+    """
+
+    def __init__(self, channels: int, partial_channels: int) -> None:
+        super().__init__()
+        if partial_channels <= 0 or partial_channels > channels:
+            raise ValueError(
+                "partial_channels must satisfy 0 < partial_channels <= channels"
+            )
+        self.channels = int(channels)
+        self.partial_channels = int(partial_channels)
+        self.pconv = nn.Conv2d(
+            self.partial_channels,
+            self.partial_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+        )
+
+    def forward(self, input_tensor: Tensor) -> Tensor:
+        head, tail = torch.split(
+            input_tensor,
+            [self.partial_channels, self.channels - self.partial_channels],
+            dim=1,
+        )
+        head = self.pconv(head)
+        return torch.cat((head, tail), dim=1)
+
+
+class _DWConvResBlock(nn.Module):
+    """Depthwise-conv residual block: ``DW3x3 -> 1x1 -> act -> 1x1`` with skip."""
+
+    def __init__(
+        self,
+        channels: int,
+        mlp_ratio: int = 2,
+        act: type[nn.Module] = nn.LeakyReLU,
+    ) -> None:
+        super().__init__()
+        hidden_channels = channels * mlp_ratio
+        self.branch = nn.Sequential(
+            nn.Conv2d(
+                channels,
+                channels,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                groups=channels,
+            ),
+            nn.Conv2d(channels, hidden_channels, kernel_size=1),
+            act(),
+            nn.Conv2d(hidden_channels, channels, kernel_size=1),
+        )
+
+    def forward(self, input_tensor: Tensor) -> Tensor:
+        return input_tensor + self.branch(input_tensor)
+
+
+class _PConvResBlock(nn.Module):
+    """Partial-conv residual block as used in HPCM analysis / synthesis stacks."""
+
+    def __init__(
+        self,
+        channels: int,
+        partial_ratio: int = 4,
+        mlp_ratio: int = 2,
+        act: type[nn.Module] = nn.LeakyReLU,
+    ) -> None:
+        super().__init__()
+        if partial_ratio <= 0:
+            raise ValueError("partial_ratio must be positive")
+        partial_channels = channels // partial_ratio
+        hidden_channels = channels * mlp_ratio
+        self.branch = nn.Sequential(
+            _PartialConv3x3(channels, partial_channels),
+            nn.Conv2d(channels, hidden_channels, kernel_size=1),
+            act(inplace=True),
+            nn.Conv2d(hidden_channels, channels, kernel_size=1),
+        )
+
+    def forward(self, input_tensor: Tensor) -> Tensor:
+        return input_tensor + self.branch(input_tensor)
 
 
 # ----------------------------------------------------------------------------
@@ -72,7 +165,7 @@ def _build_pconv_stack(
 ) -> nn.Sequential:
     return nn.Sequential(
         *[
-            PConvResBlock(channels, mlp_ratio=mlp_ratio, partial_ratio=partial_ratio)
+            _PConvResBlock(channels, mlp_ratio=mlp_ratio, partial_ratio=partial_ratio)
             for _ in range(depth)
         ]
     )
@@ -120,7 +213,7 @@ def _build_h_a(
     partial_ratio: int = 4,
 ) -> nn.Sequential:
     return nn.Sequential(
-        PConvResBlock(M, mlp_ratio=mlp_ratio, partial_ratio=partial_ratio),
+        _PConvResBlock(M, mlp_ratio=mlp_ratio, partial_ratio=partial_ratio),
         _conv2x2_down(M, N),
         *_build_pconv_stack(N, 3, mlp_ratio, partial_ratio),
         _conv2x2_down(N, N),
@@ -137,7 +230,7 @@ def _build_h_s(
         _deconv2x2_up(N, N),
         *_build_pconv_stack(N, 3, mlp_ratio, partial_ratio),
         _deconv2x2_up(N, M * 2),
-        PConvResBlock(M * 2, mlp_ratio=mlp_ratio, partial_ratio=partial_ratio),
+        _PConvResBlock(M * 2, mlp_ratio=mlp_ratio, partial_ratio=partial_ratio),
     )
 
 
@@ -147,9 +240,9 @@ class _SpatialPrior(nn.Module):
     def __init__(self, M: int, branch1_depth: int = 2, branch2_depth: int = 1) -> None:
         super().__init__()
         self.branch_1 = nn.Sequential(
-            *[DWConvResBlock(M * 3) for _ in range(branch1_depth)]
+            *[_DWConvResBlock(M * 3) for _ in range(branch1_depth)]
         )
-        tail: list[nn.Module] = [DWConvResBlock(M * 3) for _ in range(branch2_depth)]
+        tail: list[nn.Module] = [_DWConvResBlock(M * 3) for _ in range(branch2_depth)]
         tail.append(nn.Conv2d(M * 3, M * 2, kernel_size=1))
         self.branch_2 = nn.Sequential(*tail)
 
@@ -319,8 +412,8 @@ class HPCM(CompressionModel):
         )
         N = state_dict[last_h_a_keys[-1]].size(0)
 
-        # g_a inner depth: count PConvResBlocks in the 384-ch stage. Each
-        # PConvResBlock contributes 4 sub-modules; the 384-ch range is between
+        # g_a inner depth: count _PConvResBlocks in the 384-ch stage. Each
+        # _PConvResBlock contributes 4 sub-modules; the 384-ch range is between
         # the 192->384 conv2x2_down and the 384->M conv2x2_down.
         # Easier: derive from total g_a children count (index 0..5+inner_depth+...).
         g_a_indices = sorted({int(k.split(".")[1]) for k in state_dict if k.startswith("g_a.")})
@@ -342,7 +435,7 @@ class HPCM(CompressionModel):
                 if k.startswith("latent_codec.spatial_prior_s3.branch_1.")
             }
         )
-        # Each DWConvResBlock contributes 1 index. So len = y_prior_depth + 1.
+        # Each _DWConvResBlock contributes 1 index. So len = y_prior_depth + 1.
         y_prior_depth = max(1, len(s3_branch1_indices) - 1)
 
         # use_attention: presence of attn_s1.* keys in latent_codec

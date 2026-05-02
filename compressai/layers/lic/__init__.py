@@ -6,11 +6,6 @@ from .blocks import (
     OLP,
     ResidualBottleneckBlock,
 )
-from .hpcm import (
-    DWConvResBlock,
-    PartialConv3x3,
-    PConvResBlock,
-)
 from .dcae import (
     ConvolutionalGLU,
     ConvWithDW,
@@ -43,7 +38,6 @@ __all__ = [
     "ConvWithDW",
     "DepthwiseConv5x5",
     "DWConv",
-    "DWConvResBlock",
     "GatedFFN",
     "GatedTransformCNN",
     "HyperAnalysis",
@@ -56,8 +50,6 @@ __all__ = [
     "MultiScaleAggregation",
     "MutiScaleDictionaryCrossAttentionGLU",
     "OLP",
-    "PartialConv3x3",
-    "PConvResBlock",
     "ResidualBottleneckBlock",
     "ResidualBottleneckBlockWithStride",
     "ResidualBottleneckBlockWithUpsample",
