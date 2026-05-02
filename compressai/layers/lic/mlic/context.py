@@ -24,6 +24,15 @@ __all__ = [
     "LinearGlobalIntraContext",
     "LocalContext",
 ]
+
+
+def _pointwise_then_dwconv(dim: int) -> nn.Sequential:
+    return nn.Sequential(
+        nn.Conv2d(dim, dim, kernel_size=1, stride=1, padding=0),
+        nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim),
+    )
+
+
 class MLP(nn.Module):
     def __init__(
         self,
@@ -248,18 +257,9 @@ class LinearGlobalIntraContext(nn.Module):
 
         self.dim = dim
         self.num_heads = num_heads
-        self.keys = nn.Sequential(
-            nn.Conv2d(dim, dim, kernel_size=1, stride=1, padding=0),
-            nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim),
-        )
-        self.queries = nn.Sequential(
-            nn.Conv2d(dim, dim, kernel_size=1, stride=1, padding=0),
-            nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim),
-        )
-        self.values = nn.Sequential(
-            nn.Conv2d(dim, dim, kernel_size=1, stride=1, padding=0),
-            nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim),
-        )
+        self.keys = _pointwise_then_dwconv(dim)
+        self.queries = _pointwise_then_dwconv(dim)
+        self.values = _pointwise_then_dwconv(dim)
         self.reprojection = nn.Conv2d(dim, dim * 2, kernel_size=5, stride=1, padding=2)
         self.mlp = nn.Sequential(
             nn.Conv2d(dim * 2, dim * 4, kernel_size=1, stride=1),
@@ -322,18 +322,9 @@ class LinearGlobalInterContext(nn.Module):
 
         self.dim = dim
         self.num_heads = num_heads
-        self.keys = nn.Sequential(
-            nn.Conv2d(dim, dim, kernel_size=1, stride=1, padding=0),
-            nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim),
-        )
-        self.queries = nn.Sequential(
-            nn.Conv2d(dim, dim, kernel_size=1, stride=1, padding=0),
-            nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim),
-        )
-        self.values = nn.Sequential(
-            nn.Conv2d(dim, dim, kernel_size=1, stride=1, padding=0),
-            nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim),
-        )
+        self.keys = _pointwise_then_dwconv(dim)
+        self.queries = _pointwise_then_dwconv(dim)
+        self.values = _pointwise_then_dwconv(dim)
         self.reprojection = nn.Conv2d(
             dim,
             out_dim * 3 // 2,

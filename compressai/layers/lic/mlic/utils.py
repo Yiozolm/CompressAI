@@ -14,10 +14,8 @@ __all__ = [
     "checkerboard_merge",
     "checkerboard_nonanchor",
     "checkerboard_split",
-    "compress_anchor_symbols",
-    "compress_nonanchor_symbols",
-    "decompress_anchor_symbols",
-    "decompress_nonanchor_symbols",
+    "compress_symbols",
+    "decompress_symbols",
     "squeeze_anchor",
     "squeeze_nonanchor",
     "unsqueeze_anchor",
@@ -101,7 +99,7 @@ def unsqueeze_nonanchor(input_tensor: Tensor) -> Tensor:
     return output
 
 
-def _compress_symbols(
+def compress_symbols(
     gaussian_conditional: EntropyModel,
     input_tensor: Tensor,
     scales: Tensor,
@@ -121,7 +119,7 @@ def _compress_symbols(
     return unsqueeze_fn(quantized + means_half)
 
 
-def _decompress_symbols(
+def decompress_symbols(
     gaussian_conditional: EntropyModel,
     scales: Tensor,
     means: Tensor,
@@ -147,87 +145,3 @@ def _decompress_symbols(
         dtype=means_half.dtype,
     ).reshape(scales_half.shape)
     return unsqueeze_fn(decoded_tensor + means_half)
-
-
-def compress_anchor_symbols(
-    gaussian_conditional: EntropyModel,
-    anchor: Tensor,
-    scales_anchor: Tensor,
-    means_anchor: Tensor,
-    symbols_list: List[int],
-    indexes_list: List[int],
-) -> Tensor:
-    return _compress_symbols(
-        gaussian_conditional,
-        anchor,
-        scales_anchor,
-        means_anchor,
-        squeeze_anchor,
-        unsqueeze_anchor,
-        symbols_list,
-        indexes_list,
-    )
-
-
-def compress_nonanchor_symbols(
-    gaussian_conditional: EntropyModel,
-    nonanchor: Tensor,
-    scales_nonanchor: Tensor,
-    means_nonanchor: Tensor,
-    symbols_list: List[int],
-    indexes_list: List[int],
-) -> Tensor:
-    return _compress_symbols(
-        gaussian_conditional,
-        nonanchor,
-        scales_nonanchor,
-        means_nonanchor,
-        squeeze_nonanchor,
-        unsqueeze_nonanchor,
-        symbols_list,
-        indexes_list,
-    )
-
-
-def decompress_anchor_symbols(
-    gaussian_conditional: EntropyModel,
-    scales_anchor: Tensor,
-    means_anchor: Tensor,
-    decoder: object,
-    cdf: Sequence[Sequence[int]],
-    cdf_lengths: Sequence[int],
-    offsets: Sequence[int],
-) -> Tensor:
-    return _decompress_symbols(
-        gaussian_conditional,
-        scales_anchor,
-        means_anchor,
-        decoder,
-        cdf,
-        cdf_lengths,
-        offsets,
-        squeeze_anchor,
-        unsqueeze_anchor,
-    )
-
-
-def decompress_nonanchor_symbols(
-    gaussian_conditional: EntropyModel,
-    scales_nonanchor: Tensor,
-    means_nonanchor: Tensor,
-    decoder: object,
-    cdf: Sequence[Sequence[int]],
-    cdf_lengths: Sequence[int],
-    offsets: Sequence[int],
-) -> Tensor:
-    return _decompress_symbols(
-        gaussian_conditional,
-        scales_nonanchor,
-        means_nonanchor,
-        decoder,
-        cdf,
-        cdf_lengths,
-        offsets,
-        squeeze_nonanchor,
-        unsqueeze_nonanchor,
-    )

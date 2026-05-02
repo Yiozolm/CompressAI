@@ -17,10 +17,12 @@ from .utils import (
     checkerboard_merge,
     checkerboard_nonanchor,
     checkerboard_split,
-    compress_anchor_symbols,
-    compress_nonanchor_symbols,
-    decompress_anchor_symbols,
-    decompress_nonanchor_symbols,
+    compress_symbols,
+    decompress_symbols,
+    squeeze_anchor,
+    squeeze_nonanchor,
+    unsqueeze_anchor,
+    unsqueeze_nonanchor,
 )
 
 __all__ = [
@@ -38,8 +40,10 @@ __all__ = [
     "checkerboard_merge",
     "checkerboard_nonanchor",
     "checkerboard_split",
-    "compress_anchor_symbols",
-    "compress_nonanchor_symbols",
-    "decompress_anchor_symbols",
-    "decompress_nonanchor_symbols",
+    "compress_symbols",
+    "decompress_symbols",
+    "squeeze_anchor",
+    "squeeze_nonanchor",
+    "unsqueeze_anchor",
+    "unsqueeze_nonanchor",
 ]
