@@ -111,3 +111,101 @@ class TestMeanScaleContextHead:
             scale_out, mean_out = head_out.chunk(2, dim=1)
         assert torch.allclose(scale_out, expected_scale)
         assert torch.allclose(mean_out, expected_mean)
+
+
+class TestSharedDictionary:
+    def test_dt_shape_and_state_dict_path(self):
+        from compressai.models._helpers.dictionary_context import SharedDictionary
+
+        shared = SharedDictionary(dict_num=16, dictionary_dim=64)
+        assert shared.dt.shape == (16, 64)
+        assert list(shared.state_dict().keys()) == ["dt"]
+
+    def test_expand_for_broadcasts_without_copy(self):
+        from compressai.models._helpers.dictionary_context import SharedDictionary
+
+        shared = SharedDictionary(dict_num=8, dictionary_dim=32)
+        out = shared.expand_for(4)
+        assert out.shape == (4, 8, 32)
+        # All B copies share storage with the underlying dt
+        assert out.data_ptr() == shared.dt.data_ptr()
+
+
+class TestBuildDictionaryMeanScaleHead:
+    def _build(self, *, emit_mean_support=False):
+        from compressai.models._helpers.dictionary_context import (
+            SharedDictionary,
+            build_dictionary_mean_scale_head,
+        )
+
+        # Tiny config: M=32, slice_ch=8, support_count=2
+        m = 32
+        slice_ch = 8
+        support_count = 2
+        support_ch = 2 * m + slice_ch * support_count
+        shared = SharedDictionary(dict_num=8, dictionary_dim=64)
+        head = build_dictionary_mean_scale_head(
+            slice_ch=slice_ch,
+            support_ch=support_ch,
+            shared_dictionary=shared,
+            dict_output_ch=m,
+            cross_attention_kwargs={"head_num": 4, "mlp_rate": 2},
+            widths=(16,),
+            emit_mean_support=emit_mean_support,
+        )
+        return shared, head, m, slice_ch, support_ch
+
+    def test_forward_shape_no_emit(self):
+        shared, head, m, slice_ch, support_ch = self._build(emit_mean_support=False)
+        x = torch.randn(2, support_ch, 4, 4)
+        out = head(x)
+        # Output: cat([scale, mean]) → 2 * slice_ch
+        assert out.shape == (2, 2 * slice_ch, 4, 4)
+
+    def test_forward_shape_with_emit_mean_support(self):
+        shared, head, m, slice_ch, support_ch = self._build(emit_mean_support=True)
+        x = torch.randn(2, support_ch, 4, 4)
+        out = head(x)
+        # Output: cat([scale, mean, support]) where support = cat([x, dict_info(M)])
+        expected = 2 * slice_ch + (support_ch + m)
+        assert out.shape == (2, expected, 4, 4)
+
+    def test_dt_not_duplicated_in_head_state_dict(self):
+        shared, head, *_ = self._build()
+        head_keys = list(head.state_dict().keys())
+        assert all(
+            "dt" not in k for k in head_keys
+        ), f"dt leaked into head.state_dict: {[k for k in head_keys if 'dt' in k]}"
+
+    def test_dt_appears_once_in_container_state_dict(self):
+        from compressai.models._helpers.dictionary_context import (
+            SharedDictionary,
+            build_dictionary_mean_scale_head,
+        )
+
+        m, slice_ch, support_count = 32, 8, 2
+        support_ch = 2 * m + slice_ch * support_count
+
+        class _Container(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shared_dictionary = SharedDictionary(dict_num=8, dictionary_dim=64)
+                self.heads = nn.ModuleDict(
+                    {
+                        f"y{k}": build_dictionary_mean_scale_head(
+                            slice_ch=slice_ch,
+                            support_ch=support_ch,
+                            shared_dictionary=self.shared_dictionary,
+                            dict_output_ch=m,
+                            cross_attention_kwargs={"head_num": 4, "mlp_rate": 2},
+                            widths=(16,),
+                        )
+                        for k in range(3)
+                    }
+                )
+
+        container = _Container()
+        dt_keys = [k for k in container.state_dict() if k.endswith(".dt")]
+        assert dt_keys == [
+            "shared_dictionary.dt"
+        ], f"expected single shared_dictionary.dt path, got: {dt_keys}"
