@@ -569,6 +569,206 @@ class TestTcm:
         assert "module.g_a.0.conv1.weight" not in converted
 
 
+class TestDcae:
+    def _tiny_kwargs(self):
+        return dict(
+            N=64,
+            M=80,
+            hyper_channels=64,
+            num_slices=4,
+            max_support_slices=2,
+            feature_dims=(48, 64, 80),
+            block_num=(1, 1, 2),
+            head_dim=(8, 8, 8, 8, 8, 8),
+            dict_num=8,
+            dict_head_num=4,
+            dictionary_dim=32,
+            window_size=4,
+            hyper_window_size=2,
+            hyper_head_dim=8,
+        )
+
+    def test_dcae_forward_and_state_dict_round_trip(self):
+        from compressai.models.dcae import DCAE
+
+        model = DCAE(**self._tiny_kwargs()).eval()
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            out = model(x)
+        assert out["x_hat"].shape == x.shape
+        assert "y" in out["likelihoods"]
+        assert "z" in out["likelihoods"]
+
+        sd_keys = set(model.state_dict().keys())
+        # Shared dictionary lives at the model level (single state-dict path).
+        assert "shared_dictionary.dt" in sd_keys
+        assert sum(1 for k in sd_keys if k.endswith(".dt")) == 1
+        # Hyperprior backbone moved under latent_codec.* (DCAE h_a wraps a
+        # ResidualBottleneckBlockWithStride: outermost weight is .conv).
+        assert "latent_codec.h_a.0.conv.weight" in sd_keys
+        assert "latent_codec.h_s.h_mean_s.0.weight" in sd_keys
+        assert "latent_codec.h_s.h_scale_s.0.weight" in sd_keys
+        assert "latent_codec.z.entropy_bottleneck.quantiles" in sd_keys
+        # side_in_context=True -> channel_context covers y0..y(K-1).
+        assert "latent_codec.y.channel_context.y0.mean_cc.0.weight" in sd_keys
+        assert "latent_codec.y.channel_context.y1.mean_cc.0.weight" in sd_keys
+        # DCAE-specific dictionary cross-attention head.
+        assert (
+            "latent_codec.y.channel_context.y0.cross_attention.x_trans.weight"
+            in sd_keys
+        )
+        # Per-slice leaves (LRP + per-slice GaussianConditional copy).
+        assert "latent_codec.y.latent_codec.y0.lrp_transform.0.weight" in sd_keys
+        assert (
+            "latent_codec.y.latent_codec.y0.gaussian_conditional.scale_table" in sd_keys
+        )
+        assert (
+            "latent_codec.y.latent_codec.y3.gaussian_conditional.scale_table" in sd_keys
+        )
+        # Old monolithic paths should be gone.
+        assert "dt" not in sd_keys
+        assert not any(k.startswith("dt_cross_attention.") for k in sd_keys)
+        assert not any(k.startswith("cc_mean_transforms.") for k in sd_keys)
+        assert not any(k.startswith("h_z_s1.") for k in sd_keys)
+        assert not any(k.startswith("h_z_s2.") for k in sd_keys)
+
+        loaded = DCAE.from_state_dict(model.state_dict()).eval()
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+        assert loaded.N == 64
+        assert loaded.M == 80
+        assert loaded.hyper_channels == 64
+        assert loaded.num_slices == 4
+        assert loaded.max_support_slices == 2
+        assert loaded.dict_num == 8
+        assert loaded.dict_head_num == 4
+        assert loaded.dictionary_dim == 32
+
+    def test_dcae_upstream_state_dict_conversion(self):
+        convert_upstream_dcae_state_dict = _load_convert_fn(
+            "convert_dcae_checkpoint.py", "convert_upstream_dcae_state_dict"
+        )
+
+        # Synthetic upstream DCAE-style state_dict: top-level dt + per-slice
+        # ModuleLists for cc_mean / cc_scale / lrp / dt_cross_attention,
+        # single shared gaussian_conditional, model-owned hyperprior with
+        # h_z_s1 (scales) / h_z_s2 (means).
+        m = 80
+        # num_slices=4 -> slice_ch = m // 4 = 20 (used inline in shape calculations below)
+        # cc_mean.0 first conv input width = M*3 + slice_ch * 0 = 240
+        # cc_mean.1 first conv input width = M*3 + slice_ch * 1 = 260
+        # lrp.0 first conv input width = M*3 + 0 + slice_ch = 260
+        # cross_attention.0 input width = M*2 + 0 = 160
+        # cross_attention.1 input width = M*2 + slice_ch = 180
+        upstream = {
+            # Top-level dictionary tensor.
+            "dt": torch.zeros(8, 32),
+            # Per-slice dt_cross_attention: x_trans is the only Linear that
+            # consumes the original [scales, means, ...] input order.
+            "dt_cross_attention.0.x_trans.weight": torch.arange(32 * 160)
+            .float()
+            .reshape(32, 160),
+            "dt_cross_attention.0.scale": torch.zeros(4, 1, 1),
+            "dt_cross_attention.1.x_trans.weight": torch.arange(32 * 180)
+            .float()
+            .reshape(32, 180),
+            "dt_cross_attention.1.scale": torch.zeros(4, 1, 1),
+            # Per-slice cc_mean / cc_scale: first conv has the means/scales swap.
+            "cc_mean_transforms.0.0.weight": torch.arange(64 * 240)
+            .float()
+            .reshape(64, 240, 1, 1),
+            "cc_mean_transforms.1.0.weight": torch.zeros(64, 260, 1, 1),
+            "cc_scale_transforms.0.0.weight": torch.arange(64 * 240)
+            .float()
+            .reshape(64, 240, 1, 1),
+            "cc_scale_transforms.1.0.weight": torch.zeros(64, 260, 1, 1),
+            # Per-slice LRP: first conv also has the means/scales swap.
+            "lrp_transforms.0.0.weight": torch.arange(64 * 260)
+            .float()
+            .reshape(64, 260, 1, 1),
+            "lrp_transforms.1.0.weight": torch.zeros(64, 280, 1, 1),
+            # Single shared gaussian_conditional (gets fanned out per slice).
+            "gaussian_conditional.scale_table": torch.zeros(2),
+            # Model-owned hyperprior backbone.
+            "h_a.0.conv.weight": torch.zeros(64, 80, 5, 5),
+            "h_z_s1.0.weight": torch.zeros(64, 64, 3, 3),  # scales (originally h_z_s1)
+            "h_z_s2.0.weight": torch.zeros(64, 64, 3, 3),  # means (originally h_z_s2)
+            "entropy_bottleneck.quantiles": torch.zeros(64, 1, 3),
+            # g_a / g_s carry through unchanged.
+            "g_a.0.conv.weight": torch.zeros(48, 3, 5, 5),
+        }
+        converted = convert_upstream_dcae_state_dict(upstream)
+
+        # Top-level dt -> shared_dictionary.dt.
+        assert "shared_dictionary.dt" in converted
+        assert "dt" not in converted
+
+        # Per-slice cross_attention re-rooted; x_trans.weight has its first 2*M
+        # input channels (dim=1) swapped (means/scales reorder).
+        assert (
+            "latent_codec.y.channel_context.y0.cross_attention.x_trans.weight"
+            in converted
+        )
+        original = upstream["dt_cross_attention.0.x_trans.weight"]
+        swapped = converted[
+            "latent_codec.y.channel_context.y0.cross_attention.x_trans.weight"
+        ]
+        # Swap should leave the trailing channels (>=2*M) unchanged but flip
+        # the leading [0:M] and [M:2M] blocks.
+        assert torch.equal(swapped[:, :m], original[:, m : 2 * m])
+        assert torch.equal(swapped[:, m : 2 * m], original[:, :m])
+        # cross_attention scale (head_num,1,1) carries through unchanged.
+        assert "latent_codec.y.channel_context.y0.cross_attention.scale" in converted
+
+        # Per-slice cc_mean / cc_scale re-rooted with means/scales swap on first conv.
+        assert "latent_codec.y.channel_context.y0.mean_cc.0.weight" in converted
+        original_cc = upstream["cc_mean_transforms.0.0.weight"]
+        swapped_cc = converted["latent_codec.y.channel_context.y0.mean_cc.0.weight"]
+        assert torch.equal(swapped_cc[:, :m], original_cc[:, m : 2 * m])
+        assert torch.equal(swapped_cc[:, m : 2 * m], original_cc[:, :m])
+        assert "latent_codec.y.channel_context.y1.mean_cc.0.weight" in converted
+        assert "latent_codec.y.channel_context.y0.scale_cc.0.weight" in converted
+
+        # Per-slice LRP re-rooted with means/scales swap on first conv.
+        assert "latent_codec.y.latent_codec.y0.lrp_transform.0.weight" in converted
+        original_lrp = upstream["lrp_transforms.0.0.weight"]
+        swapped_lrp = converted["latent_codec.y.latent_codec.y0.lrp_transform.0.weight"]
+        assert torch.equal(swapped_lrp[:, :m], original_lrp[:, m : 2 * m])
+        assert torch.equal(swapped_lrp[:, m : 2 * m], original_lrp[:, :m])
+
+        # gaussian_conditional fanned out to all K slices (driven by num_slices = 2 here:
+        # only cc_mean has indices 0 and 1).
+        assert (
+            "latent_codec.y.latent_codec.y0.gaussian_conditional.scale_table"
+            in converted
+        )
+        assert (
+            "latent_codec.y.latent_codec.y1.gaussian_conditional.scale_table"
+            in converted
+        )
+
+        # Hyperprior backbone moved under latent_codec.*; h_z_s2 -> h_mean_s,
+        # h_z_s1 -> h_scale_s (originally swapped on the upstream side).
+        assert "latent_codec.h_a.0.conv.weight" in converted
+        assert "latent_codec.h_s.h_mean_s.0.weight" in converted  # was h_z_s2
+        assert "latent_codec.h_s.h_scale_s.0.weight" in converted  # was h_z_s1
+        assert "latent_codec.z.entropy_bottleneck.quantiles" in converted
+
+        # g_a / g_s carry through unchanged.
+        assert "g_a.0.conv.weight" in converted
+
+        # Old root-level paths should be gone after conversion.
+        assert "h_a.0.conv.weight" not in converted
+        assert "h_z_s1.0.weight" not in converted
+        assert "h_z_s2.0.weight" not in converted
+        assert "entropy_bottleneck.quantiles" not in converted
+        assert "cc_mean_transforms.0.0.weight" not in converted
+        assert "lrp_transforms.0.0.weight" not in converted
+        assert "dt_cross_attention.0.x_trans.weight" not in converted
+        assert "gaussian_conditional.scale_table" not in converted
+
+
 class TestCca:
     def test_cca_forward_and_state_dict_round_trip(self):
         from compressai.models.cca import CCAModel
