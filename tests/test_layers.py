@@ -272,6 +272,29 @@ class TestMutiScaleDictionaryCrossAttentionGLU:
             )
 
 
+class TestWavelet:
+    @staticmethod
+    def test_dwt_idwt_round_trip():
+        pytest.importorskip("pytorch_wavelets")
+        from compressai.layers.wave import DWT2D, IDWT2D
+
+        dwt = DWT2D(wave="haar")
+        idwt = IDWT2D(wave="haar")
+        x = torch.randn(2, 3, 16, 16)
+        sub = dwt(x)
+        # 4 subbands -> output channels = 4 * input
+        assert sub.shape == (2, 12, 8, 8)
+        rec = idwt(sub)
+        assert rec.shape == x.shape
+        assert (rec - x).abs().max().item() < 1e-5
+
+    @staticmethod
+    def test_is_pytorch_wavelets_available_returns_bool():
+        from compressai.layers.wave import is_pytorch_wavelets_available
+
+        assert isinstance(is_pytorch_wavelets_available(), bool)
+
+
 class TestQReLU:
     @staticmethod
     def test_QReLU():
