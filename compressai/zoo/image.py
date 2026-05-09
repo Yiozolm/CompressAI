@@ -86,6 +86,8 @@ __all__ = [
     "stf_wacnn",
     "tcm",
     "cca",
+    "dcae",
+    "saaf",
 ]
 
 model_architectures = {
@@ -101,6 +103,8 @@ model_architectures = {
     "stf-wacnn": _LazyImport("compressai.models.stf", "WACNN"),
     "tcm": _LazyImport("compressai.models.tcm", "TCM"),
     "cca": _LazyImport("compressai.models.cca", "CCAModel"),
+    "dcae": _LazyImport("compressai.models.dcae", "DCAE"),
+    "saaf": _LazyImport("compressai.models.saaf", "SAAF"),
 }
 
 root_url = "https://compressai.s3.amazonaws.com/models/v1"
@@ -569,3 +573,43 @@ def cca(pretrained: bool = False, progress: bool = True, **kwargs):
     from compressai.models.cca import CCAModel
 
     return CCAModel(**kwargs)
+
+
+def dcae(pretrained: bool = False, progress: bool = True, **kwargs):
+    r"""DCAE model from J. Lu, L. Zhang, X. Zhou, M. Li, W. Li, S. Gu:
+    `"Learned Image Compression with Dictionary-based Entropy Model"
+    <https://arxiv.org/abs/2504.00496>`_, IEEE/CVF Conf. on Computer
+    Vision and Pattern Recognition (CVPR), 2025.
+
+    Args:
+        pretrained (bool): If True, returns a pre-trained model. Currently
+            unavailable; raises ``RuntimeError``.
+        progress (bool): If True, displays a progress bar of the download to
+            stderr.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained DCAE weights are not yet hosted on S3.")
+    from compressai.models.dcae import DCAE
+
+    return DCAE(**kwargs)
+
+
+def saaf(pretrained: bool = False, progress: bool = True, **kwargs):
+    r"""SAAF model from H. Ma, X. Shi, H. Sun, X. Yue, X. Liu, G. Wang,
+    W. Cai: "Learned Image Compression via Sparse Attention and Adaptive
+    Frequency", IEEE/CVF Conf. on Computer Vision and Pattern Recognition
+    (CVPR), 2026.
+
+    Args:
+        pretrained (bool): If True, returns a pre-trained model. Currently
+            unavailable; raises ``RuntimeError``.
+        progress (bool): If True, displays a progress bar of the download to
+            stderr.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained SAAF weights are not yet hosted on S3.")
+    from compressai.models.saaf import SAAF
+
+    return SAAF(**kwargs)
