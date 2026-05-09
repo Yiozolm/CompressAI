@@ -889,6 +889,214 @@ class TestDcae:
         assert "gaussian_conditional.scale_table" not in converted
 
 
+class TestSaaf:
+    def _tiny_kwargs(self):
+        # Same shape as TestDcae for direct cross-comparison.
+        return dict(
+            N=64,
+            M=80,
+            hyper_channels=64,
+            num_slices=4,
+            max_support_slices=2,
+            feature_dims=(48, 64, 80),
+            block_num=(1, 1, 2),
+            head_dim=(8, 8, 8, 8, 8, 8),
+            dict_num=8,
+            dict_head_num=4,
+            dictionary_dim=32,
+            window_size=4,
+            hyper_window_size=2,
+            hyper_head_dim=8,
+        )
+
+    def test_saaf_forward_and_state_dict_round_trip(self):
+        from compressai.models.saaf import SAAF
+
+        model = SAAF(**self._tiny_kwargs()).eval()
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            out = model(x)
+        assert out["x_hat"].shape == x.shape
+        assert "y" in out["likelihoods"]
+        assert "z" in out["likelihoods"]
+        # diffusion_loss is always present in the output dict; zero in eval mode.
+        assert "diffusion_loss" in out
+        assert out["diffusion_loss"].dim() == 0
+        assert out["diffusion_loss"].item() == 0.0
+
+        sd_keys = set(model.state_dict().keys())
+        # Shared dictionary lives at the model level (single state-dict path).
+        assert "shared_dictionary.dt" in sd_keys
+        assert sum(1 for k in sd_keys if k.endswith(".dt")) == 1
+        # Hyperprior backbone moved under latent_codec.* (SAAF h_a wraps a
+        # ResidualBottleneckBlockWithStride: outermost weight is .conv).
+        assert "latent_codec.h_a.0.conv.weight" in sd_keys
+        assert "latent_codec.h_s.h_mean_s.0.weight" in sd_keys
+        assert "latent_codec.h_s.h_scale_s.0.weight" in sd_keys
+        assert "latent_codec.z.entropy_bottleneck.quantiles" in sd_keys
+        # side_in_context=True -> channel_context covers y0..y(K-1).
+        assert "latent_codec.y.channel_context.y0.mean_cc.0.weight" in sd_keys
+        assert "latent_codec.y.channel_context.y1.mean_cc.0.weight" in sd_keys
+        # Dictionary cross-attention head (shared with DCAE).
+        assert (
+            "latent_codec.y.channel_context.y0.cross_attention.x_trans.weight"
+            in sd_keys
+        )
+        # Per-slice leaves (LRP + per-slice GaussianConditional copy).
+        assert "latent_codec.y.latent_codec.y0.lrp_transform.0.weight" in sd_keys
+        assert (
+            "latent_codec.y.latent_codec.y0.gaussian_conditional.scale_table" in sd_keys
+        )
+        # SAAF-specific: aux_enc / aux_dec each carry an OLP per stage,
+        # and diffusion_prior holds the noise predictor.
+        assert "aux_enc.0.olp.linear.weight" in sd_keys
+        assert "aux_dec.3.olp.linear.weight" in sd_keys
+        assert "diffusion_prior.noise_predictor.0.weight" in sd_keys
+        # Old monolithic paths should be gone.
+        assert "dt" not in sd_keys
+        assert not any(k.startswith("dt_cross_attention.") for k in sd_keys)
+        assert not any(k.startswith("cc_mean_transforms.") for k in sd_keys)
+        assert not any(k.startswith("h_z_s1.") for k in sd_keys)
+        assert not any(k.startswith("h_z_s2.") for k in sd_keys)
+
+        loaded = SAAF.from_state_dict(model.state_dict()).eval()
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+        assert loaded.N == 64
+        assert loaded.M == 80
+        assert loaded.dict_num == 8
+
+    def test_saaf_aux_loss_is_nonzero_scalar(self):
+        from compressai.models.saaf import SAAF
+
+        # SAAF integrates AuxT unconditionally (every _AdaptiveFrequencyBlock /
+        # _InverseAdaptiveFrequencyBlock carries an OLP), so aux_loss is
+        # always a non-trivial scalar — unlike TCM where use_auxt=False
+        # gives zero.
+        model = SAAF(**self._tiny_kwargs()).eval()
+        loss = model.aux_loss()
+        assert loss.dim() == 0
+        assert torch.isfinite(loss)
+        assert loss.item() > 0
+
+    def test_saaf_diffusion_loss_active_in_training_mode(self):
+        from compressai.models.saaf import SAAF
+
+        model = SAAF(**self._tiny_kwargs()).train()
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            out = model(x)
+        assert out["diffusion_loss"].dim() == 0
+        # Random init + random noise -> finite, non-zero scalar.
+        assert torch.isfinite(out["diffusion_loss"])
+        assert out["diffusion_loss"].item() > 0
+
+    def test_saaf_upstream_state_dict_conversion(self):
+        convert_upstream_saaf_state_dict = _load_convert_fn(
+            "convert_saaf_checkpoint.py", "convert_upstream_saaf_state_dict"
+        )
+
+        # Synthetic upstream SAAF-style state_dict — same entropy backbone
+        # as DCAE plus SAAF-specific aux_enc / aux_dec / diffusion_prior
+        # keys that must pass through unchanged.
+        m = 80
+        # num_slices=4 -> slice_ch = m // 4 = 20 (used inline below)
+        upstream = {
+            "dt": torch.zeros(8, 32),
+            "dt_cross_attention.0.x_trans.weight": torch.arange(32 * 160)
+            .float()
+            .reshape(32, 160),
+            "dt_cross_attention.0.scale": torch.zeros(4, 1, 1),
+            "cc_mean_transforms.0.0.weight": torch.arange(64 * 240)
+            .float()
+            .reshape(64, 240, 1, 1),
+            "cc_mean_transforms.1.0.weight": torch.zeros(64, 260, 1, 1),
+            "cc_scale_transforms.0.0.weight": torch.arange(64 * 240)
+            .float()
+            .reshape(64, 240, 1, 1),
+            "lrp_transforms.0.0.weight": torch.arange(64 * 260)
+            .float()
+            .reshape(64, 260, 1, 1),
+            "gaussian_conditional.scale_table": torch.zeros(2),
+            "h_a.0.conv.weight": torch.zeros(64, 80, 5, 5),
+            "h_z_s1.0.weight": torch.zeros(64, 64, 3, 3),  # scales
+            "h_z_s2.0.weight": torch.zeros(64, 64, 3, 3),  # means
+            "entropy_bottleneck.quantiles": torch.zeros(64, 1, 3),
+            "g_a.0.conv.weight": torch.zeros(48, 3, 5, 5),
+            # SAAF-specific keys that should pass through unchanged.
+            "aux_enc.0.olp.linear.weight": torch.zeros(48, 3),
+            "aux_enc.0.freq_weights": torch.zeros(4),
+            "aux_dec.3.olp.linear.weight": torch.zeros(3, 48),
+            "diffusion_prior.noise_predictor.0.weight": torch.zeros(80, 80, 3, 3),
+        }
+        converted = convert_upstream_saaf_state_dict(upstream)
+
+        # Top-level dt -> shared_dictionary.dt.
+        assert "shared_dictionary.dt" in converted
+        assert "dt" not in converted
+
+        # Means/scales swap on cross_attention.x_trans (first 2*M cols).
+        original = upstream["dt_cross_attention.0.x_trans.weight"]
+        swapped = converted[
+            "latent_codec.y.channel_context.y0.cross_attention.x_trans.weight"
+        ]
+        assert torch.equal(swapped[:, :m], original[:, m : 2 * m])
+        assert torch.equal(swapped[:, m : 2 * m], original[:, :m])
+
+        # Same swap on cc_mean and lrp_transform first conv weights.
+        for src_key, dst_key in (
+            (
+                "cc_mean_transforms.0.0.weight",
+                "latent_codec.y.channel_context.y0.mean_cc.0.weight",
+            ),
+            (
+                "lrp_transforms.0.0.weight",
+                "latent_codec.y.latent_codec.y0.lrp_transform.0.weight",
+            ),
+        ):
+            original_w = upstream[src_key]
+            swapped_w = converted[dst_key]
+            assert torch.equal(swapped_w[:, :m], original_w[:, m : 2 * m])
+            assert torch.equal(swapped_w[:, m : 2 * m], original_w[:, :m])
+
+        # gaussian_conditional fanned out per slice.
+        assert (
+            "latent_codec.y.latent_codec.y0.gaussian_conditional.scale_table"
+            in converted
+        )
+        assert (
+            "latent_codec.y.latent_codec.y1.gaussian_conditional.scale_table"
+            in converted
+        )
+
+        # h_z_s2 -> h_mean_s, h_z_s1 -> h_scale_s renames (DCAE convention).
+        assert "latent_codec.h_a.0.conv.weight" in converted
+        assert "latent_codec.h_s.h_mean_s.0.weight" in converted
+        assert "latent_codec.h_s.h_scale_s.0.weight" in converted
+        assert "latent_codec.z.entropy_bottleneck.quantiles" in converted
+
+        # SAAF-specific aux_enc / aux_dec / diffusion_prior pass through
+        # without any rename.
+        assert "aux_enc.0.olp.linear.weight" in converted
+        assert "aux_enc.0.freq_weights" in converted
+        assert "aux_dec.3.olp.linear.weight" in converted
+        assert "diffusion_prior.noise_predictor.0.weight" in converted
+
+        # g_a / g_s pass through unchanged.
+        assert "g_a.0.conv.weight" in converted
+
+        # Old root-level entropy paths gone.
+        assert "h_a.0.conv.weight" not in converted
+        assert "h_z_s1.0.weight" not in converted
+        assert "h_z_s2.0.weight" not in converted
+        assert "entropy_bottleneck.quantiles" not in converted
+        assert "cc_mean_transforms.0.0.weight" not in converted
+        assert "lrp_transforms.0.0.weight" not in converted
+        assert "dt_cross_attention.0.x_trans.weight" not in converted
+        assert "gaussian_conditional.scale_table" not in converted
+
+
 class TestCca:
     def test_cca_forward_and_state_dict_round_trip(self):
         from compressai.models.cca import CCAModel
