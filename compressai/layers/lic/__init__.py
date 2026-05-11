@@ -27,15 +27,10 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from .bound_ops import LowerBound
-from .ops import compute_padding, quantize_ste
-from .parametrizers import NonNegativeParametrizer
-from .sga import SGAQuantizer
+"""LIC-specific layers.
 
-__all__ = [
-    "compute_padding",
-    "quantize_ste",
-    "LowerBound",
-    "NonNegativeParametrizer",
-    "SGAQuantizer",
-]
+Subpackages under this namespace may depend on optional extras. Import concrete
+modules by their deep paths, e.g. ``compressai.layers.lic.mlic``.
+"""
+
+__all__ = []

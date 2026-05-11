@@ -31,6 +31,6 @@ from .basic import *
 from .gdn import *
 from .layers import *
 
-# Window-based attention layers in `.attn` depend on `timm` (optional via the
-# `[attn]` extras). Not re-exported here so that `import compressai` works
-# without `timm` — import them via `from compressai.layers.attn import ...`.
+# Attention-related layers in `.attn` and LIC model subpackages may depend on
+# `timm` (optional via the `[attn]` extras). Not re-exported here so that
+# `import compressai` works without `timm` -- import them via deep paths.

@@ -1,5 +1,10 @@
 # Copyright (c) 2021-2025, InterDigital Communications, Inc
 # All rights reserved.
+#
+# This file adapts code from https://github.com/JiangWeibeta/MLIC
+# (originally distributed under the Apache License 2.0). Modifications by
+# InterDigital Communications, Inc. are released under the BSD 3-Clause Clear
+# License terms below.
 
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted (subject to the limitations in the disclaimer
@@ -27,15 +32,60 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from .bound_ops import LowerBound
-from .ops import compute_padding, quantize_ste
-from .parametrizers import NonNegativeParametrizer
-from .sga import SGAQuantizer
+from .context import (
+    ChannelContext,
+    LinearGlobalInterContext,
+    LinearGlobalIntraContext,
+    LocalContext,
+    StackedCheckerboardConv,
+    VanillaGlobalInterContext,
+    VanillaGlobalIntraContext,
+    WindowCheckerboardAttn,
+)
+from .transforms import (
+    AnalysisTransform,
+    EntropyParameters,
+    HyperAnalysis,
+    HyperSynthesis,
+    LatentResidualPrediction,
+    SynthesisTransform,
+)
+from .utils import (
+    checkerboard_anchor,
+    checkerboard_merge,
+    checkerboard_nonanchor,
+    checkerboard_split,
+    compress_symbols,
+    decompress_symbols,
+    squeeze_anchor,
+    squeeze_nonanchor,
+    unsqueeze_anchor,
+    unsqueeze_nonanchor,
+)
 
 __all__ = [
-    "compute_padding",
-    "quantize_ste",
-    "LowerBound",
-    "NonNegativeParametrizer",
-    "SGAQuantizer",
+    "AnalysisTransform",
+    "ChannelContext",
+    "EntropyParameters",
+    "HyperAnalysis",
+    "HyperSynthesis",
+    "LatentResidualPrediction",
+    "LinearGlobalInterContext",
+    "LinearGlobalIntraContext",
+    "LocalContext",
+    "SynthesisTransform",
+    "StackedCheckerboardConv",
+    "VanillaGlobalInterContext",
+    "VanillaGlobalIntraContext",
+    "WindowCheckerboardAttn",
+    "checkerboard_anchor",
+    "checkerboard_merge",
+    "checkerboard_nonanchor",
+    "checkerboard_split",
+    "compress_symbols",
+    "decompress_symbols",
+    "squeeze_anchor",
+    "squeeze_nonanchor",
+    "unsqueeze_anchor",
+    "unsqueeze_nonanchor",
 ]

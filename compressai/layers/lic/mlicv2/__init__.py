@@ -1,5 +1,10 @@
 # Copyright (c) 2021-2025, InterDigital Communications, Inc
 # All rights reserved.
+#
+# This file adapts the MLIC family design from https://github.com/JiangWeibeta/MLIC
+# (originally distributed under the Apache License 2.0). Modifications by
+# InterDigital Communications, Inc. are released under the BSD 3-Clause Clear
+# License terms below.
 
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted (subject to the limitations in the disclaimer
@@ -27,15 +32,15 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from .bound_ops import LowerBound
-from .ops import compute_padding, quantize_ste
-from .parametrizers import NonNegativeParametrizer
-from .sga import SGAQuantizer
+from .context import ContextReweighting, GSCModule, HGCPModule, RoPE2D
+from .transforms import SimpleTokenMixing, STMAnalysis, STMSynthesis
 
 __all__ = [
-    "compute_padding",
-    "quantize_ste",
-    "LowerBound",
-    "NonNegativeParametrizer",
-    "SGAQuantizer",
+    "ContextReweighting",
+    "GSCModule",
+    "HGCPModule",
+    "RoPE2D",
+    "STMAnalysis",
+    "STMSynthesis",
+    "SimpleTokenMixing",
 ]
