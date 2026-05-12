@@ -41,7 +41,7 @@ from compressai.latent_codecs._slice_helpers import (
 )
 from compressai.layers.attn.dictionary import ConvolutionalGLU, Scale
 from compressai.layers.attn.swin import pad_to_window_multiple
-from compressai.layers.lic import (
+from compressai.layers.lic.blocks import (
     ResidualBottleneckBlockWithStride,
     ResidualBottleneckBlockWithUpsample,
 )

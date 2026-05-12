@@ -27,56 +27,10 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from .image import (
-    bmshj2018_factorized,
-    bmshj2018_factorized_relu,
-    bmshj2018_hyperprior,
-    cheng2020_anchor,
-    cheng2020_attn,
-    dcae,
-    saaf,
-    mbt2018,
-    mbt2018_mean,
-    stf,
-    stf_wacnn,
-    tcm,
-    cca,
-)
-from .image_vbr import bmshj2018_hyperprior_vbr, mbt2018_mean_vbr, mbt2018_vbr
-from .pretrained import load_pretrained as load_state_dict
-from .video import ssf2020
+"""LIC-specific layers.
 
-image_models = {
-    "bmshj2018-factorized": bmshj2018_factorized,
-    "bmshj2018-factorized-relu": bmshj2018_factorized_relu,
-    "bmshj2018-hyperprior": bmshj2018_hyperprior,
-    "mbt2018-mean": mbt2018_mean,
-    "mbt2018": mbt2018,
-    "cheng2020-anchor": cheng2020_anchor,
-    "cheng2020-attn": cheng2020_attn,
-    "dcae": dcae,
-    "saaf": saaf,
-    "stf": stf,
-    "stf-wacnn": stf_wacnn,
-    "tcm": tcm,
-    "cca": cca,
-    "bmshj2018-hyperprior-vbr": bmshj2018_hyperprior_vbr,
-    "mbt2018-mean-vbr": mbt2018_mean_vbr,
-    "mbt2018-vbr": mbt2018_vbr,
-}
+Subpackages under this namespace may depend on optional extras. Import concrete
+modules by their deep paths, e.g. ``compressai.layers.lic.mlic``.
+"""
 
-# Not yet available.
-pointcloud_models = {
-    "hrtzxf2022-pcc-rec": None,
-    "sfu2023-pcc-rec-pointnet": None,
-    "sfu2024-pcc-rec-pointnet2-ssg": None,
-}
-
-video_models = {
-    "ssf2020": ssf2020,
-}
-
-models = {}
-models.update(image_models)
-models.update(pointcloud_models)
-models.update(video_models)
+__all__ = []
