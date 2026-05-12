@@ -53,6 +53,7 @@ from compressai.models import (
     Informer,
     InvCompress,
     JointAutoregressiveHierarchicalPriors,
+    LBHIC,
     MambaIC,
     MambaVC,
     MeanScaleHyperprior,
@@ -88,6 +89,7 @@ __all__ = [
     "hpcm_phi",
     "informer",
     "invcompress",
+    "lbhic",
     "mambaic",
     "mambavc",
     "mlicpp",
@@ -145,6 +147,7 @@ candidate_model_architectures = {
     "hpcm-phi": HPCM,
     "informer": Informer,
     "invcompress": InvCompress if is_freia_available() else None,
+    "lbhic": LBHIC,
     "cca": CCAModel,
     "mambaic": MambaIC,
     "mambavc": MambaVC,
@@ -501,6 +504,19 @@ def invcompress(pretrained: bool = False, progress: bool = True, **kwargs):
             "Install `compressai[invcompress]` to enable this model."
         )
     return InvCompress(**kwargs)
+
+
+def lbhic(pretrained: bool = False, progress: bool = True, **kwargs):
+    """LBHIC — Learned Block-based Hybrid Image Compression.
+
+    Reproduces Wu et al. (arXiv:2012.09550) with block-wise CPM prediction,
+    K=3 GMM entropy modeling, and BPM post-processing. The candidate only
+    contains the paper PDF, so pre-trained weights are not mirrored.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return LBHIC(**kwargs)
 
 
 def informer(pretrained: bool = False, progress: bool = True, **kwargs):

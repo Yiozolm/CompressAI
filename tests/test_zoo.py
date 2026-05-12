@@ -50,6 +50,7 @@ from compressai.models import (
     Informer,
     InvCompress,
     JointAutoregressiveHierarchicalPriors,
+    LBHIC,
     MambaIC,
     MambaVC,
     MeanScaleHyperprior,
@@ -83,6 +84,7 @@ from compressai.zoo import (
     hpcm_phi,
     informer,
     invcompress,
+    lbhic,
     mambaic,
     mambavc,
     mbt2018,
@@ -331,6 +333,24 @@ class TestCandidateModels:
 
         with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
             invcompress(pretrained=True)
+
+    def test_lbhic(self):
+        net = lbhic(
+            N=8,
+            M=12,
+            block_size=64,
+            prediction_channels=8,
+            post_channels=8,
+            post_growth_channels=4,
+            post_grdb_blocks=1,
+            post_dense_layers=2,
+        )
+
+        assert isinstance(net, LBHIC)
+        assert candidate_model_architectures["lbhic"] is LBHIC
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            lbhic(pretrained=True)
 
     def test_mambaic(self):
         net = mambaic(

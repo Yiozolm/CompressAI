@@ -56,6 +56,7 @@ from compressai.models import (
     GainedScaleHyperprior,
     Informer,
     InvCompress,
+    LBHIC,
     MambaIC,
     MambaVC,
     MLICPlusPlus,
@@ -741,6 +742,53 @@ class TestModels:
         updated_loaded = NIC.from_state_dict(model.state_dict())
         assert updated_loaded.entropy_bottleneck._quantized_cdf.numel() > 0
         assert updated_loaded.gaussian_conditional.scale_table.numel() > 0
+
+    def test_lbhic(self):
+        model = LBHIC(
+            N=8,
+            M=12,
+            block_size=64,
+            prediction_channels=8,
+            post_channels=8,
+            post_growth_channels=4,
+            post_grdb_blocks=1,
+            post_dense_layers=2,
+            boundary_width=2,
+        )
+        model.eval()
+        x = torch.rand(1, 3, 128, 128)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert out["x_hat"].shape == x.shape
+        assert out["x_hat_blocks"].shape == x.shape
+        assert out["boundary_mask"].shape == (1, 1, 128, 128)
+        assert out["boundary_mask"].sum() > 0
+        assert out["likelihoods"]["y"].shape == (1, 12, 8, 8)
+        assert out["likelihoods"]["z"].shape == (1, 8, 2, 2)
+        assert torch.isfinite(out["x_hat"]).all()
+        assert (out["likelihoods"]["y"] > 0).all()
+        assert (out["likelihoods"]["z"] > 0).all()
+
+        loaded = LBHIC.from_state_dict(model.state_dict())
+        assert loaded.N == 8
+        assert loaded.M == 12
+        assert loaded.block_size == 64
+        assert loaded.prediction_channels == 8
+        assert loaded.post_channels == 8
+        assert loaded.post_grdb_blocks == 1
+        assert loaded.post_dense_layers == 2
+
+        loaded.eval()
+        with torch.no_grad():
+            out2 = loaded(x)
+        assert torch.allclose(out["x_hat"], out2["x_hat"])
+        assert torch.allclose(out["likelihoods"]["y"], out2["likelihoods"]["y"])
+        assert torch.allclose(out["likelihoods"]["z"], out2["likelihoods"]["z"])
+
+        with pytest.raises(NotImplementedError, match="forward/rate-estimation"):
+            model.compress(x)
 
     def test_nvtc(self):
         model = NVTC(

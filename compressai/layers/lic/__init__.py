@@ -19,15 +19,29 @@ from .dcae import (
     SpatialAttentionModule,
     SwinBlockWithConvMulti,
 )
+from .lbhic import (
+    BoundaryAwarePostProcessing,
+    BoundedNonLocalBlock,
+    ContextualPredictionModule,
+    GroupedResidualDenseBlock,
+    ResidualDenseBlock as LBHICResidualDenseBlock,
+    make_boundary_mask,
+)
 
 __all__ = [
+    "BoundaryAwarePostProcessing",
+    "BoundedNonLocalBlock",
     "ConvolutionalGLU",
     "ConvWithDW",
+    "ContextualPredictionModule",
     "DepthwiseConv5x5",
     "DWConv",
     "GatedFFN",
     "GatedTransformCNN",
+    "GroupedResidualDenseBlock",
     "LayerNorm2d",
+    "LBHICResidualDenseBlock",
+    "make_boundary_mask",
     "MultiScaleAggregation",
     "MutiScaleDictionaryCrossAttentionGLU",
     "OLP",

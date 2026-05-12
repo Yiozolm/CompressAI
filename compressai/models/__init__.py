@@ -40,6 +40,7 @@ from .google import *
 from .hpcm import *
 from .informer import *
 from .invcompress import *
+from .lbhic import *
 from .mambaic import *
 from .mambavc import *
 from .mlicpp import *
