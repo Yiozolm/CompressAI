@@ -30,45 +30,46 @@
 import pytest
 
 from compressai.layers import is_pytorch_wavelets_available
-from compressai.models import is_freia_available
 from compressai.models import (
-    CCAModel,
     CMIC,
+    DCAE,
+    HPCM,
+    NIC,
+    SAAF,
+    TCM,
+    TIC,
+    CCAModel,
     Cheng2020Anchor,
     Cheng2020Attention,
-    DCAE,
     Entroformer,
     FactorizedPrior,
     FrequencyAwareTransFormer,
     GainedMSHyperprior,
     GainedScaleHyperprior,
-    HPCM,
     Informer,
     InvCompress,
     JointAutoregressiveHierarchicalPriors,
     MambaIC,
     MambaVC,
-    MLICPlusPlus,
     MeanScaleHyperprior,
+    MLICPlusPlus,
     RefBasedAR,
-    SAAF,
-    SCGainedMSHyperprior,
     ScaleHyperprior,
+    SCGainedMSHyperprior,
     ShiftLIC,
-    TCM,
-    TIC,
     TinyLIC,
     WeConvene,
+    is_freia_available,
 )
 from compressai.zoo import (
     bmshj2018_factorized,
     bmshj2018_factorized_relu,
     bmshj2018_hyperprior,
     bmshj2018_hyperprior_gained,
+    candidate_model_architectures,
     cca,
     cheng2020_anchor,
     cheng2020_attn,
-    candidate_model_architectures,
     cmic,
     dcae,
     entroformer,
@@ -81,11 +82,12 @@ from compressai.zoo import (
     invcompress,
     mambaic,
     mambavc,
-    mlicpp,
     mbt2018,
     mbt2018_mean,
     mbt2018_mean_gained,
     mbt2018_mean_gained_sc,
+    mlicpp,
+    nic,
     qian2021_ref,
     saaf,
     shiftlic_large,
@@ -369,6 +371,15 @@ class TestCandidateModels:
         with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
             mambavc(pretrained=True)
 
+    def test_nic(self):
+        net = nic(N2=8, M=16, M1=8)
+
+        assert isinstance(net, NIC)
+        assert candidate_model_architectures["nic"] is NIC
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            nic(pretrained=True)
+
     def test_tinylic(self):
         net = tinylic(N=128, M=320)
 
@@ -488,12 +499,19 @@ class TestCandidateModels:
             if not expect_attention:
                 # PhiContext factory ignores attn_window_* kwargs because
                 # use_attention=False; pass only the shape kwargs.
-                for key in ("attn_window_s1", "attn_window_s2", "attn_window_s3", "attn_num_heads"):
+                for key in (
+                    "attn_window_s1",
+                    "attn_window_s2",
+                    "attn_window_s3",
+                    "attn_num_heads",
+                ):
                     kwargs.pop(key)
             net = factory(**kwargs)
             assert isinstance(net, HPCM)
             assert net.use_attention is expect_attention
-            with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            with pytest.raises(
+                RuntimeError, match="Pre-trained model not yet available"
+            ):
                 factory(pretrained=True)
 
         assert candidate_model_architectures["hpcm"] is HPCM

@@ -42,6 +42,7 @@ from .invcompress import *
 from .mambaic import *
 from .mambavc import *
 from .mlicpp import *
+from .nic import *
 from .pointcloud import *
 from .saaf import *
 from .sensetime import *

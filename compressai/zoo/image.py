@@ -31,37 +31,38 @@ from torch.hub import load_state_dict_from_url
 
 from compressai.layers import is_pytorch_wavelets_available
 from compressai.models import (
-    CCAModel,
     CMIC,
+    DCAE,
+    GLIC,
+    HPCM,
+    NIC,
+    SAAF,
+    TCM,
+    TIC,
+    WACNN,
+    CCAModel,
     Cheng2020Anchor,
     Cheng2020Attention,
-    DCAE,
     Entroformer,
     FactorizedPrior,
     FactorizedPriorReLU,
     FrequencyAwareTransFormer,
     GainedMSHyperprior,
     GainedScaleHyperprior,
-    GLIC,
-    HPCM,
     Informer,
     InvCompress,
+    JointAutoregressiveHierarchicalPriors,
     MambaIC,
     MambaVC,
-    JointAutoregressiveHierarchicalPriors,
-    MLICPlusPlus,
     MeanScaleHyperprior,
+    MLICPlusPlus,
     RefBasedAR,
-    SAAF,
-    SCGainedMSHyperprior,
     ScaleHyperprior,
+    SCGainedMSHyperprior,
     ShiftLIC,
     SymmetricalTransFormer,
-    TCM,
-    TIC,
     TinyLIC,
     WeConvene,
-    WACNN,
     is_freia_available,
 )
 
@@ -87,6 +88,7 @@ __all__ = [
     "mambaic",
     "mambavc",
     "mlicpp",
+    "nic",
     "qian2021_ref",
     "saaf",
     "shiftlic_small",
@@ -142,6 +144,7 @@ candidate_model_architectures = {
     "mambaic": MambaIC,
     "mambavc": MambaVC,
     "tinylic": TinyLIC,
+    "nic": NIC,
     "tic": TIC,
     "shiftlic-small": ShiftLIC,
     "shiftlic-middle": ShiftLIC,
@@ -543,6 +546,18 @@ def mambavc(pretrained: bool = False, progress: bool = True, **kwargs):
     return MambaVC(**kwargs)
 
 
+def nic(pretrained: bool = False, progress: bool = True, **kwargs):
+    """NIC/NLAIC - non-local attention image compression (Chen et al., TIP 2021).
+
+    Pre-trained checkpoints are hosted by the upstream NJUVISION repository and
+    are not mirrored here.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return NIC(**kwargs)
+
+
 def tinylic(pretrained: bool = False, progress: bool = True, **kwargs):
     """TinyLIC — NAT-based learned image compression (Lu & Ma, 2022).
 
@@ -663,9 +678,7 @@ def bmshj2018_hyperprior_gained(
     return GainedScaleHyperprior(**kwargs)
 
 
-def mbt2018_mean_gained(
-    pretrained: bool = False, progress: bool = True, **kwargs
-):
+def mbt2018_mean_gained(pretrained: bool = False, progress: bool = True, **kwargs):
     """Gained variable-rate MeanScaleHyperprior (Cui et al., CVPR 2021).
 
     The community-trained checkpoint at
@@ -678,9 +691,7 @@ def mbt2018_mean_gained(
     return GainedMSHyperprior(**kwargs)
 
 
-def mbt2018_mean_gained_sc(
-    pretrained: bool = False, progress: bool = True, **kwargs
-):
+def mbt2018_mean_gained_sc(pretrained: bool = False, progress: bool = True, **kwargs):
     """Spatial-channel gained MS hyperprior with SFT modulation.
 
     Adds a quality-map (qmap) input fused via SPADE-style SFT blocks at three

@@ -31,8 +31,6 @@ import pytest
 import torch
 import torch.nn as nn
 
-from compressai.layers import is_pytorch_wavelets_available
-from compressai.models import is_freia_available
 from compressai.entropy_models import EntropyBottleneck
 from compressai.latent_codecs import (
     ChannelSliceLatentCodec,
@@ -40,29 +38,32 @@ from compressai.latent_codecs import (
     MLICPlusPlusLatentCodec,
     WeChARMLatentCodec,
 )
+from compressai.layers import is_pytorch_wavelets_available
 from compressai.models import (
-    CCAModel,
     CMIC,
     DCAE,
+    HPCM,
+    NIC,
+    SAAF,
+    TCM,
+    TIC,
+    WACNN,
+    CCAModel,
     Entroformer,
     FrequencyAwareTransFormer,
     GainedMSHyperprior,
     GainedScaleHyperprior,
-    HPCM,
     Informer,
     InvCompress,
     MambaIC,
     MambaVC,
     MLICPlusPlus,
     RefBasedAR,
-    SAAF,
     SCGainedMSHyperprior,
     ShiftLIC,
-    TCM,
-    TIC,
     TinyLIC,
-    WACNN,
     WeConvene,
+    is_freia_available,
 )
 from compressai.models.google import (
     SCALES_LEVELS,
@@ -684,6 +685,61 @@ class TestModels:
         assert len(compressed["strings"][1]) == x.size(0)
         assert decoded["x_hat"].shape == x.shape
 
+    def test_nic(self):
+        model = NIC(N2=8, M=16, M1=8)
+        model.eval()
+        x = torch.rand(1, 3, 64, 64)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert "x_hat" in out
+        assert "likelihoods" in out
+        assert "y" in out["likelihoods"]
+        assert "z" in out["likelihoods"]
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 16, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 8, 1, 1)
+
+        loaded = NIC.from_state_dict(model.state_dict())
+        assert loaded.N2 == 8
+        assert loaded.M == 16
+        assert loaded.M1 == 8
+
+        legacy_state_dict = {}
+        for key, value in model.state_dict().items():
+            if key.startswith("entropy_bottleneck.matrices."):
+                key = key.replace(
+                    "entropy_bottleneck.matrices.",
+                    "factorized_entropy_func._matrices.",
+                    1,
+                )
+            elif key.startswith("entropy_bottleneck.biases."):
+                key = key.replace(
+                    "entropy_bottleneck.biases.",
+                    "factorized_entropy_func._bias.",
+                    1,
+                )
+            elif key.startswith("entropy_bottleneck.factors."):
+                key = key.replace(
+                    "entropy_bottleneck.factors.",
+                    "factorized_entropy_func._factor.",
+                    1,
+                )
+            elif key.startswith("entropy_bottleneck."):
+                continue
+            legacy_state_dict[key] = value
+
+        legacy_loaded = NIC.from_state_dict(legacy_state_dict)
+        assert legacy_loaded.N2 == 8
+        assert legacy_loaded.M == 16
+        assert legacy_loaded.M1 == 8
+
+        model.update(force=True)
+        updated_loaded = NIC.from_state_dict(model.state_dict())
+        assert updated_loaded.entropy_bottleneck._quantized_cdf.numel() > 0
+        assert updated_loaded.gaussian_conditional.scale_table.numel() > 0
+
     def test_mambaic(self):
         model = MambaIC(
             depths=(1, 1, 1, 1),
@@ -1271,9 +1327,7 @@ class TestModels:
         loaded_gdn = RefBasedAR.from_state_dict(model_gdn.state_dict())
         assert loaded_gdn.norm == "GDN"
 
-    @pytest.mark.parametrize(
-        "variant", ["scale", "ms", "sc"]
-    )
+    @pytest.mark.parametrize("variant", ["scale", "ms", "sc"])
     def test_gained(self, variant):
         # Small config to keep RANS roundtrip cheap; 3 levels lets us exercise
         # interpolation between adjacent levels (s in [0, levels-2]).
