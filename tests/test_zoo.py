@@ -53,6 +53,7 @@ from compressai.models import (
     MambaVC,
     MeanScaleHyperprior,
     MLICPlusPlus,
+    NVTC,
     RefBasedAR,
     ScaleHyperprior,
     SCGainedMSHyperprior,
@@ -88,6 +89,7 @@ from compressai.zoo import (
     mbt2018_mean_gained_sc,
     mlicpp,
     nic,
+    nvtc,
     qian2021_ref,
     saaf,
     shiftlic_large,
@@ -379,6 +381,27 @@ class TestCandidateModels:
 
         with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
             nic(pretrained=True)
+
+    def test_nvtc(self):
+        net = nvtc(
+            lmbda=8,
+            n_stage=2,
+            n_layer=(1, 1),
+            downscale_factor=(2, 4),
+            vt_dim=(8, 8),
+            vt_nunit=(1, 1),
+            block_size=(2, 2),
+            cb_dim=(2, 4),
+            cb_size=(8, 16),
+            param_dim=(2, 2),
+            param_nlevel=(4, 4),
+        )
+
+        assert isinstance(net, NVTC)
+        assert candidate_model_architectures["nvtc"] is NVTC
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            nvtc(pretrained=True)
 
     def test_tinylic(self):
         net = tinylic(N=128, M=320)

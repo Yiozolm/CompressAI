@@ -43,6 +43,7 @@ from .mambaic import *
 from .mambavc import *
 from .mlicpp import *
 from .nic import *
+from .nvtc import *
 from .pointcloud import *
 from .saaf import *
 from .sensetime import *

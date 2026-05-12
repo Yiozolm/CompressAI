@@ -56,6 +56,7 @@ from compressai.models import (
     MambaVC,
     MeanScaleHyperprior,
     MLICPlusPlus,
+    NVTC,
     RefBasedAR,
     ScaleHyperprior,
     SCGainedMSHyperprior,
@@ -89,6 +90,7 @@ __all__ = [
     "mambavc",
     "mlicpp",
     "nic",
+    "nvtc",
     "qian2021_ref",
     "saaf",
     "shiftlic_small",
@@ -145,6 +147,7 @@ candidate_model_architectures = {
     "mambavc": MambaVC,
     "tinylic": TinyLIC,
     "nic": NIC,
+    "nvtc": NVTC,
     "tic": TIC,
     "shiftlic-small": ShiftLIC,
     "shiftlic-middle": ShiftLIC,
@@ -556,6 +559,18 @@ def nic(pretrained: bool = False, progress: bool = True, **kwargs):
     if pretrained:
         raise RuntimeError("Pre-trained model not yet available")
     return NIC(**kwargs)
+
+
+def nvtc(pretrained: bool = False, progress: bool = True, **kwargs):
+    """NVTC — Nonlinear Vector Transform Coding (Feng et al., CVPR 2023).
+
+    The upstream implementation does not include practical entropy coding, so
+    this entry exposes forward/rate-estimation support only.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return NVTC(**kwargs)
 
 
 def tinylic(pretrained: bool = False, progress: bool = True, **kwargs):

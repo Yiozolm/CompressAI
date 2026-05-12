@@ -58,6 +58,7 @@ from compressai.models import (
     MambaIC,
     MambaVC,
     MLICPlusPlus,
+    NVTC,
     RefBasedAR,
     SCGainedMSHyperprior,
     ShiftLIC,
@@ -739,6 +740,47 @@ class TestModels:
         updated_loaded = NIC.from_state_dict(model.state_dict())
         assert updated_loaded.entropy_bottleneck._quantized_cdf.numel() > 0
         assert updated_loaded.gaussian_conditional.scale_table.numel() > 0
+
+    def test_nvtc(self):
+        model = NVTC(
+            lmbda=8,
+            n_stage=2,
+            n_layer=(1, 1),
+            downscale_factor=(2, 4),
+            vt_dim=(8, 8),
+            vt_nunit=(1, 1),
+            block_size=(2, 2),
+            cb_dim=(2, 4),
+            cb_size=(8, 16),
+            param_dim=(2, 2),
+            param_nlevel=(4, 4),
+        )
+        model.eval()
+        x = torch.rand(1, 3, 32, 32)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert "x_hat" in out
+        assert "likelihoods" in out
+        assert out["x_hat"].shape == x.shape
+        assert "vq" in out["likelihoods"]
+        assert out["likelihoods"]["vq"].dim() == 1
+        assert out["likelihoods"]["vq"].numel() > 0
+        assert out["bpp"].item() >= 0
+
+        loaded = NVTC.from_state_dict(model.state_dict(), lmbda=8)
+        assert loaded.n_stage == 2
+        assert loaded.n_layer == (1, 1)
+        assert loaded.downscale_factor == (2, 4)
+        assert loaded.vt_dim == (8, 8)
+
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+
+        with pytest.raises(NotImplementedError, match="practical entropy coding"):
+            model.compress(x)
 
     def test_mambaic(self):
         model = MambaIC(
