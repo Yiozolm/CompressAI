@@ -1,4 +1,5 @@
 from .cam import CausalAttentionModule
+from .contextformer import ContextFormerBlock, ContextFormerContextModel
 from .cross import CrossAttention, CrossAttentionBlock
 from .cross_window import WindowedCrossAttention
 from .entroformer import (
@@ -49,6 +50,8 @@ from .swin_attention import (
 __all__ = [
     "CausalAttentionModule",
     "ConvTransBlock",
+    "ContextFormerBlock",
+    "ContextFormerContextModel",
     "CrossAttention",
     "CrossAttentionBlock",
     "EntroformerAttention",

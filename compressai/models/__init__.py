@@ -30,6 +30,7 @@
 from .base import *
 from .cca import *
 from .cmic import *
+from .contextformer import *
 from .damo import *
 from .dcae import *
 from .ftic import *

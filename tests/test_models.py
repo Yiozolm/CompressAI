@@ -41,6 +41,7 @@ from compressai.latent_codecs import (
 from compressai.layers import is_pytorch_wavelets_available
 from compressai.models import (
     CMIC,
+    ContextFormer,
     DCAE,
     HPCM,
     NIC,
@@ -1239,6 +1240,65 @@ class TestModels:
         with torch.no_grad():
             out_loaded = loaded(x)
         assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+
+    def test_contextformer(self):
+        model = ContextFormer(
+            N=32,
+            M=32,
+            num_segments=4,
+            embed_dim=32,
+            depth=1,
+            num_heads=4,
+            mlp_ratio=2,
+            max_spatial_size=8,
+        )
+        model.eval()
+        x = torch.rand(1, 3, 64, 64)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert "x_hat" in out
+        assert "likelihoods" in out
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 32, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 32, 1, 1)
+        assert torch.isfinite(out["x_hat"]).all()
+        assert (out["likelihoods"]["y"] > 0).all()
+        assert (out["likelihoods"]["z"] > 0).all()
+
+        loaded = ContextFormer.from_state_dict(model.state_dict())
+        assert loaded.N == 32
+        assert loaded.M == 32
+        assert loaded.num_segments == 4
+        assert loaded.embed_dim == 32
+        assert loaded.mixtures == 3
+
+        loaded.eval()
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+        assert torch.allclose(out["likelihoods"]["y"], out_loaded["likelihoods"]["y"])
+        assert torch.allclose(out["likelihoods"]["z"], out_loaded["likelihoods"]["z"])
+        with pytest.raises(NotImplementedError):
+            loaded.compress(x)
+
+        sfo = ContextFormer(
+            N=16,
+            M=16,
+            num_segments=4,
+            embed_dim=16,
+            depth=1,
+            num_heads=4,
+            mlp_ratio=2,
+            order="sfo",
+            max_spatial_size=8,
+        )
+        sfo.eval()
+        with torch.no_grad():
+            sfo_out = sfo(x)
+        assert sfo_out["x_hat"].shape == x.shape
+        assert sfo_out["likelihoods"]["y"].shape == (1, 16, 4, 4)
 
     def test_informer(self):
         # Default config (N=192, M=192, num_global=8). 256x256 → y is 16x16.

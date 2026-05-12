@@ -32,6 +32,7 @@ from torch.hub import load_state_dict_from_url
 from compressai.layers import is_pytorch_wavelets_available
 from compressai.models import (
     CMIC,
+    ContextFormer,
     DCAE,
     GLIC,
     HPCM,
@@ -76,6 +77,7 @@ __all__ = [
     "bmshj2018_hyperprior_gained",
     "cca",
     "cmic",
+    "contextformer",
     "dcae",
     "entroformer",
     "ftic",
@@ -125,6 +127,7 @@ model_architectures = {
 candidate_model_architectures = {
     "glic": GLIC,
     "cmic": CMIC if is_pytorch_wavelets_available() else None,
+    "contextformer": ContextFormer,
     "mlicpp": MLICPlusPlus,
     "qian2021-ref": RefBasedAR,
     "stf-wacnn": WACNN,
@@ -451,6 +454,19 @@ def cmic(pretrained: bool = False, progress: bool = True, **kwargs):
             "Install `compressai[lic]` to enable this model."
         )
     return CMIC(**kwargs)
+
+
+def contextformer(pretrained: bool = False, progress: bool = True, **kwargs):
+    """ContextFormer — spatio-channel Transformer context model.
+
+    `arXiv:2203.02452 <https://arxiv.org/abs/2203.02452>`_. This entry exposes
+    forward/rate-estimation support with a K=3 Gaussian mixture likelihood.
+    Pre-trained weights are not mirrored.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return ContextFormer(**kwargs)
 
 
 def cca(pretrained: bool = False, progress: bool = True, **kwargs):

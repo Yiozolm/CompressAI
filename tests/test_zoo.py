@@ -32,6 +32,7 @@ import pytest
 from compressai.layers import is_pytorch_wavelets_available
 from compressai.models import (
     CMIC,
+    ContextFormer,
     DCAE,
     HPCM,
     NIC,
@@ -72,6 +73,7 @@ from compressai.zoo import (
     cheng2020_anchor,
     cheng2020_attn,
     cmic,
+    contextformer,
     dcae,
     entroformer,
     ftic,
@@ -429,6 +431,24 @@ class TestCandidateModels:
 
         with pytest.raises(RuntimeError, match="not yet available"):
             informer(pretrained=True)
+
+    def test_contextformer(self):
+        net = contextformer(
+            N=32,
+            M=32,
+            num_segments=4,
+            embed_dim=32,
+            depth=1,
+            num_heads=4,
+            mlp_ratio=2,
+            max_spatial_size=8,
+        )
+
+        assert isinstance(net, ContextFormer)
+        assert candidate_model_architectures["contextformer"] is ContextFormer
+
+        with pytest.raises(RuntimeError, match="not yet available"):
+            contextformer(pretrained=True)
 
     def test_entroformer(self):
         net = entroformer(
