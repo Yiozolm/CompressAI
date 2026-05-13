@@ -64,6 +64,10 @@ from compressai.models import (
     RefBasedAR,
     SCGainedMSHyperprior,
     ShiftLIC,
+    TBTCConvChARM,
+    TBTCConvHyperprior,
+    TBTCSwinTChARM,
+    TBTCSwinTHyperprior,
     TinyLIC,
     WeConvene,
     is_freia_available,
@@ -92,6 +96,41 @@ class DummyCompressionModel(CompressionModel):
     def __init__(self, entropy_bottleneck_channels):
         super().__init__()
         self.entropy_bottleneck = EntropyBottleneck(entropy_bottleneck_channels)
+
+
+def _small_tbtc_swint_cfg():
+    return {
+        "g_a": {
+            "input_dim": 3,
+            "embed_dim": [8, 16, 24, 32],
+            "embed_out_dim": [16, 24, 32, None],
+            "depths": [1, 1, 1, 1],
+            "head_dim": None,
+            "window_size": [4, 4, 4, 4],
+        },
+        "g_s": {
+            "embed_dim": [32, 24, 16, 8],
+            "embed_out_dim": [24, 16, 8, 3],
+            "depths": [1, 1, 1, 1],
+            "head_dim": None,
+            "window_size": [4, 4, 4, 4],
+        },
+        "h_a": {
+            "input_dim": 32,
+            "embed_dim": [16, 16],
+            "embed_out_dim": [16, None],
+            "depths": [1, 1],
+            "head_dim": None,
+            "window_size": [2, 1],
+        },
+        "h_s": {
+            "embed_dim": [16, 16],
+            "embed_out_dim": [16, 64],
+            "depths": [1, 1],
+            "head_dim": None,
+            "window_size": [1, 2],
+        },
+    }
 
 
 class TestCompressionModel:
@@ -221,6 +260,75 @@ class TestModels:
         assert z_likelihoods_shape[1] == 128
         assert z_likelihoods_shape[2] == x.shape[2] / 2**6
         assert z_likelihoods_shape[3] == x.shape[3] / 2**6
+
+    def test_tbtc_conv_hyperprior(self):
+        model = TBTCConvHyperprior(main_dim=32, hyper_dim=16)
+        model.eval()
+        x = torch.rand(1, 3, 64, 64)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 32, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 16, 1, 1)
+
+        loaded = TBTCConvHyperprior.from_state_dict(model.state_dict())
+        assert loaded.main_dim == 32
+        assert loaded.hyper_dim == 16
+
+        model.update(force=True)
+        with torch.no_grad():
+            compressed = model.compress(x)
+            decoded = model.decompress(compressed["strings"], compressed["shape"])
+        assert len(compressed["strings"]) == 2
+        assert decoded["x_hat"].shape == x.shape
+
+    def test_tbtc_conv_charm(self):
+        model = TBTCConvChARM(main_dim=32, hyper_dim=16, num_slices=4)
+        model.eval()
+        x = torch.rand(1, 3, 64, 64)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 32, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 16, 1, 1)
+        loaded = TBTCConvChARM.from_state_dict(model.state_dict())
+        assert loaded.num_slices == 4
+        assert loaded.slice_channels == 8
+
+        model.update(force=True)
+        with torch.no_grad():
+            compressed = model.compress(x)
+            decoded = model.decompress(compressed["strings"], compressed["shape"])
+        assert len(compressed["strings"][0]) == 1
+        assert decoded["x_hat"].shape == x.shape
+
+    def test_tbtc_swint_hyperprior(self):
+        model = TBTCSwinTHyperprior(**_small_tbtc_swint_cfg())
+        model.eval()
+        x = torch.rand(1, 3, 64, 64)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 32, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 16, 1, 1)
+
+    def test_tbtc_swint_charm(self):
+        model = TBTCSwinTChARM(num_slices=4, **_small_tbtc_swint_cfg())
+        model.eval()
+        x = torch.rand(1, 3, 64, 64)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 32, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 16, 1, 1)
 
     def test_jarhp(self, tmpdir):
         model = JointAutoregressiveHierarchicalPriors(128, 192)

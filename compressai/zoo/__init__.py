@@ -70,6 +70,10 @@ from .image import (
     tic,
     tinylic,
     weconvene,
+    zyc2022_conv_charm,
+    zyc2022_conv_hyperprior,
+    zyc2022_swint_charm,
+    zyc2022_swint_hyperprior,
 )
 from .image_vbr import bmshj2018_hyperprior_vbr, mbt2018_mean_vbr, mbt2018_vbr
 from .pretrained import load_pretrained as load_state_dict
@@ -110,6 +114,10 @@ image_models = {
     "tic": tic,
     "tinylic": tinylic,
     "weconvene": weconvene,
+    "zyc2022-conv-hyperprior": zyc2022_conv_hyperprior,
+    "zyc2022-conv-charm": zyc2022_conv_charm,
+    "zyc2022-swint-hyperprior": zyc2022_swint_hyperprior,
+    "zyc2022-swint-charm": zyc2022_swint_charm,
     "mbt2018-mean": mbt2018_mean,
     "mbt2018": mbt2018,
     "cheng2020-anchor": cheng2020_anchor,

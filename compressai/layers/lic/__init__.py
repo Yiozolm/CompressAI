@@ -27,6 +27,17 @@ from .lbhic import (
     ResidualDenseBlock as LBHICResidualDenseBlock,
     make_boundary_mask,
 )
+from .tbtc import (
+    TBTCAnalysisTransform,
+    TBTCBasicLayer,
+    TBTCHyperAnalysisTransform,
+    TBTCHyperSynthesisTransform,
+    TBTCPatchEmbed,
+    TBTCPatchMerging,
+    TBTCPatchSplitting,
+    TBTCSwinTransformerBlock,
+    TBTCSynthesisTransform,
+)
 
 __all__ = [
     "BoundaryAwarePostProcessing",
@@ -52,4 +63,13 @@ __all__ = [
     "Scale",
     "SpatialAttentionModule",
     "SwinBlockWithConvMulti",
+    "TBTCAnalysisTransform",
+    "TBTCBasicLayer",
+    "TBTCHyperAnalysisTransform",
+    "TBTCHyperSynthesisTransform",
+    "TBTCPatchEmbed",
+    "TBTCPatchMerging",
+    "TBTCPatchSplitting",
+    "TBTCSwinTransformerBlock",
+    "TBTCSynthesisTransform",
 ]

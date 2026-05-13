@@ -27,6 +27,8 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from copy import deepcopy
+
 from torch.hub import load_state_dict_from_url
 
 from compressai.layers import is_pytorch_wavelets_available
@@ -64,6 +66,10 @@ from compressai.models import (
     SCGainedMSHyperprior,
     ShiftLIC,
     SymmetricalTransFormer,
+    TBTCConvChARM,
+    TBTCConvHyperprior,
+    TBTCSwinTChARM,
+    TBTCSwinTHyperprior,
     TinyLIC,
     WeConvene,
     is_freia_available,
@@ -106,6 +112,10 @@ __all__ = [
     "tic",
     "tinylic",
     "weconvene",
+    "zyc2022_conv_charm",
+    "zyc2022_conv_hyperprior",
+    "zyc2022_swint_charm",
+    "zyc2022_swint_hyperprior",
     "mbt2018",
     "mbt2018_mean",
     "mbt2018_mean_gained",
@@ -161,6 +171,10 @@ candidate_model_architectures = {
     "bmshj2018-hyperprior-gained": GainedScaleHyperprior,
     "mbt2018-mean-gained": GainedMSHyperprior,
     "mbt2018-mean-gained-sc": SCGainedMSHyperprior,
+    "zyc2022-conv-hyperprior": TBTCConvHyperprior,
+    "zyc2022-conv-charm": TBTCConvChARM,
+    "zyc2022-swint-hyperprior": TBTCSwinTHyperprior,
+    "zyc2022-swint-charm": TBTCSwinTChARM,
 }
 
 root_url = "https://compressai.s3.amazonaws.com/models/v1"
@@ -388,6 +402,108 @@ def _load_model(
 
     model = model_architectures[architecture](*cfgs[architecture][quality], **kwargs)
     return model
+
+
+_TBTC_CONV_CFGS = {
+    "S": {"main_dim": 192, "hyper_dim": 128},
+    "M": {"main_dim": 320, "hyper_dim": 192},
+    "L": {"main_dim": 448, "hyper_dim": 256},
+}
+
+
+def _tbtc_swint_cfg(g_dims, h_dims):
+    main_dim = g_dims[-1]
+    head_dim = [32] * 4
+    return {
+        "g_a": {
+            "input_dim": 3,
+            "embed_dim": g_dims,
+            "embed_out_dim": [g_dims[1], g_dims[2], g_dims[3], None],
+            "depths": [2, 2, 6, 2],
+            "head_dim": head_dim,
+            "window_size": [8, 8, 8, 8],
+        },
+        "g_s": {
+            "embed_dim": [g_dims[3], g_dims[2], g_dims[1], g_dims[0]],
+            "embed_out_dim": [g_dims[2], g_dims[1], g_dims[0], 3],
+            "depths": [2, 6, 2, 2],
+            "head_dim": head_dim,
+            "window_size": [8, 8, 8, 8],
+        },
+        "h_a": {
+            "input_dim": main_dim,
+            "embed_dim": [h_dims[1], h_dims[1]],
+            "embed_out_dim": [h_dims[1], None],
+            "depths": [5, 1],
+            "head_dim": [32, 32],
+            "window_size": [4, 4],
+        },
+        "h_s": {
+            "embed_dim": [h_dims[1], h_dims[0]],
+            "embed_out_dim": [h_dims[0], 2 * main_dim],
+            "depths": [1, 5],
+            "head_dim": [32, 32],
+            "window_size": [4, 4],
+        },
+    }
+
+
+_TBTC_SWINT_CFGS = {
+    "S": _tbtc_swint_cfg([96, 128, 160, 192], [96, 128]),
+    "M": _tbtc_swint_cfg([128, 192, 256, 320], [192, 192]),
+    "L": _tbtc_swint_cfg([160, 256, 352, 448], [192, 256]),
+}
+
+
+def _validate_tbtc_request(quality: str, metric: str, pretrained: bool) -> str:
+    if metric not in ("mse", "ms-ssim"):
+        raise ValueError(f'Invalid metric "{metric}"')
+    quality = quality.upper()
+    if quality not in ("S", "M", "L"):
+        raise ValueError(f'Invalid quality "{quality}", should be in ["S", "M", "L"]')
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    return quality
+
+
+def zyc2022_conv_hyperprior(
+    quality: str = "M", metric: str = "mse", pretrained: bool = False, progress: bool = True, **kwargs
+):
+    del progress
+    quality = _validate_tbtc_request(quality, metric, pretrained)
+    cfg = dict(_TBTC_CONV_CFGS[quality])
+    cfg.update(kwargs)
+    return TBTCConvHyperprior(**cfg)
+
+
+def zyc2022_conv_charm(
+    quality: str = "M", metric: str = "mse", pretrained: bool = False, progress: bool = True, **kwargs
+):
+    del progress
+    quality = _validate_tbtc_request(quality, metric, pretrained)
+    cfg = dict(_TBTC_CONV_CFGS[quality])
+    cfg.update(kwargs)
+    return TBTCConvChARM(**cfg)
+
+
+def zyc2022_swint_hyperprior(
+    quality: str = "M", metric: str = "mse", pretrained: bool = False, progress: bool = True, **kwargs
+):
+    del progress
+    quality = _validate_tbtc_request(quality, metric, pretrained)
+    cfg = deepcopy(_TBTC_SWINT_CFGS[quality])
+    cfg.update(kwargs)
+    return TBTCSwinTHyperprior(**cfg)
+
+
+def zyc2022_swint_charm(
+    quality: str = "M", metric: str = "mse", pretrained: bool = False, progress: bool = True, **kwargs
+):
+    del progress
+    quality = _validate_tbtc_request(quality, metric, pretrained)
+    cfg = deepcopy(_TBTC_SWINT_CFGS[quality])
+    cfg.update(kwargs)
+    return TBTCSwinTChARM(**cfg)
 
 
 def glic(pretrained: bool = False, progress: bool = True, **kwargs):

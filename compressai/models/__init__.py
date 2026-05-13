@@ -51,6 +51,7 @@ from .saaf import *
 from .sensetime import *
 from .shiftlic import *
 from .stf import *
+from .tbtc import *
 from .tcm import *
 from .tic import *
 from .tinylic import *

@@ -60,6 +60,10 @@ from compressai.models import (
     ScaleHyperprior,
     SCGainedMSHyperprior,
     ShiftLIC,
+    TBTCConvChARM,
+    TBTCConvHyperprior,
+    TBTCSwinTChARM,
+    TBTCSwinTHyperprior,
     TinyLIC,
     WeConvene,
     is_freia_available,
@@ -103,8 +107,47 @@ from compressai.zoo import (
     tic,
     tinylic,
     weconvene,
+    zyc2022_conv_charm,
+    zyc2022_conv_hyperprior,
+    zyc2022_swint_charm,
+    zyc2022_swint_hyperprior,
 )
 from compressai.zoo.image import _load_model
+
+
+def _small_tbtc_swint_cfg():
+    return {
+        "g_a": {
+            "input_dim": 3,
+            "embed_dim": [8, 16, 24, 32],
+            "embed_out_dim": [16, 24, 32, None],
+            "depths": [1, 1, 1, 1],
+            "head_dim": None,
+            "window_size": [4, 4, 4, 4],
+        },
+        "g_s": {
+            "embed_dim": [32, 24, 16, 8],
+            "embed_out_dim": [24, 16, 8, 3],
+            "depths": [1, 1, 1, 1],
+            "head_dim": None,
+            "window_size": [4, 4, 4, 4],
+        },
+        "h_a": {
+            "input_dim": 32,
+            "embed_dim": [16, 16],
+            "embed_out_dim": [16, None],
+            "depths": [1, 1],
+            "head_dim": None,
+            "window_size": [2, 1],
+        },
+        "h_s": {
+            "embed_dim": [16, 16],
+            "embed_out_dim": [16, 64],
+            "depths": [1, 1],
+            "head_dim": None,
+            "window_size": [1, 2],
+        },
+    }
 
 
 class TestLoadModel:
@@ -442,6 +485,42 @@ class TestCandidateModels:
 
         with pytest.raises(RuntimeError, match="not yet available"):
             tic(pretrained=True)
+
+    def test_tbtc_conv_hyperprior(self):
+        net = zyc2022_conv_hyperprior(main_dim=32, hyper_dim=16)
+
+        assert isinstance(net, TBTCConvHyperprior)
+        assert candidate_model_architectures["zyc2022-conv-hyperprior"] is TBTCConvHyperprior
+
+        with pytest.raises(RuntimeError, match="not yet available"):
+            zyc2022_conv_hyperprior(pretrained=True)
+
+    def test_tbtc_conv_charm(self):
+        net = zyc2022_conv_charm(main_dim=32, hyper_dim=16, num_slices=4)
+
+        assert isinstance(net, TBTCConvChARM)
+        assert candidate_model_architectures["zyc2022-conv-charm"] is TBTCConvChARM
+
+        with pytest.raises(RuntimeError, match="not yet available"):
+            zyc2022_conv_charm(pretrained=True)
+
+    def test_tbtc_swint_hyperprior(self):
+        net = zyc2022_swint_hyperprior(**_small_tbtc_swint_cfg())
+
+        assert isinstance(net, TBTCSwinTHyperprior)
+        assert candidate_model_architectures["zyc2022-swint-hyperprior"] is TBTCSwinTHyperprior
+
+        with pytest.raises(RuntimeError, match="not yet available"):
+            zyc2022_swint_hyperprior(pretrained=True)
+
+    def test_tbtc_swint_charm(self):
+        net = zyc2022_swint_charm(num_slices=4, **_small_tbtc_swint_cfg())
+
+        assert isinstance(net, TBTCSwinTChARM)
+        assert candidate_model_architectures["zyc2022-swint-charm"] is TBTCSwinTChARM
+
+        with pytest.raises(RuntimeError, match="not yet available"):
+            zyc2022_swint_charm(pretrained=True)
 
     def test_informer(self):
         net = informer(N=64, M=64, num_global=4)
