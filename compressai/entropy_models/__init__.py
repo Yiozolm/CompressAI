@@ -34,17 +34,25 @@ from .entropy_models import (
     GaussianMixtureConditional,
 )
 from .entropy_models_vbr import EntropyBottleneckVbr, EntropyModelVbr
+from .glmm import GaussianLaplaceLogisticMixtureConditional
 from .gaussian_conditional_shifted import GsnConditionalLocScaleShift, Scaler
 from .gaussian_generalized import GeneralizedGaussianConditional
+from .laplace import LaplaceConditional, LaplaceMixtureConditional
 from .cca import CausalContextAdjustmentEntropyModel
 from .learned_gaussian_bottleneck import LearnedGaussianBottleneck
+from .logistic import LogisticConditional, LogisticMixtureConditional
 
 __all__ = [
     "EntropyModel",
     "EntropyBottleneck",
     "GaussianConditional",
     "GaussianMixtureConditional",
+    "GaussianLaplaceLogisticMixtureConditional",
     "GeneralizedGaussianConditional",
+    "LaplaceConditional",
+    "LaplaceMixtureConditional",
+    "LogisticConditional",
+    "LogisticMixtureConditional",
     "GsnConditionalLocScaleShift",
     "Scaler",
     "CausalContextAdjustmentEntropyModel",

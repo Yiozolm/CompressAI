@@ -37,6 +37,7 @@ from compressai.models import (
     ContextFormer,
     DCAE,
     GLIC,
+    GLLMM,
     HPCM,
     NIC,
     SAAF,
@@ -88,6 +89,7 @@ __all__ = [
     "dcae",
     "entroformer",
     "ftic",
+    "gllmm",
     "glic",
     "hpcm",
     "hpcm_base",
@@ -158,6 +160,7 @@ candidate_model_architectures = {
     "informer": Informer,
     "invcompress": InvCompress if is_freia_available() else None,
     "lbhic": LBHIC,
+    "gllmm": GLLMM,
     "cca": CCAModel,
     "mambaic": MambaIC,
     "mambavc": MambaVC,
@@ -695,6 +698,19 @@ def mambavc(pretrained: bool = False, progress: bool = True, **kwargs):
     if pretrained:
         raise RuntimeError("Pre-trained model not yet available")
     return MambaVC(**kwargs)
+
+
+def gllmm(quality: int = 1, pretrained: bool = False, progress: bool = True, **kwargs):
+    """GLLMM image compression model (Fu et al., TIP 2023)."""
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained model not yet available")
+    if quality not in (1, 8):
+        raise ValueError(f'Invalid quality value "{quality}"')
+
+    config = {"N": 128 if quality == 1 else 256}
+    config.update(kwargs)
+    return GLLMM(**config)
 
 
 def nic(pretrained: bool = False, progress: bool = True, **kwargs):

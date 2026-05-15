@@ -54,6 +54,7 @@ from compressai.models import (
     FrequencyAwareTransFormer,
     GainedMSHyperprior,
     GainedScaleHyperprior,
+    GLLMM,
     Informer,
     InvCompress,
     LBHIC,
@@ -850,6 +851,30 @@ class TestModels:
         updated_loaded = NIC.from_state_dict(model.state_dict())
         assert updated_loaded.entropy_bottleneck._quantized_cdf.numel() > 0
         assert updated_loaded.gaussian_conditional.scale_table.numel() > 0
+
+    def test_gllmm(self):
+        model = GLLMM(N=8).eval()
+        x = torch.rand(1, 3, 64, 64)
+
+        with torch.no_grad():
+            out = model(x)
+
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 8, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 8, 1, 1)
+        assert (out["likelihoods"]["y"] > 0).all()
+        assert (out["likelihoods"]["z"] > 0).all()
+
+        loaded = GLLMM.from_state_dict(model.state_dict())
+        assert loaded.N == 8
+        assert loaded.M == 8
+
+        model.update(force=True)
+        updated_loaded = GLLMM.from_state_dict(model.state_dict())
+        assert updated_loaded.entropy_bottleneck._quantized_cdf.numel() > 0
+        assert updated_loaded.gaussian_conditional.gaussian.scale_table.numel() > 0
+        assert updated_loaded.gaussian_conditional.laplace.scale_table.numel() > 0
+        assert updated_loaded.gaussian_conditional.logistic.scale_table.numel() > 0
 
     def test_lbhic(self):
         model = LBHIC(

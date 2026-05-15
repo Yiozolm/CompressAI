@@ -27,6 +27,11 @@ from .lbhic import (
     ResidualDenseBlock as LBHICResidualDenseBlock,
     make_boundary_mask,
 )
+from .gllmm import (
+    GLLMMNonLocalAttentionBlock,
+    GLLMMResidualBottleneck,
+    GLLMMResidualChain,
+)
 from .tbtc import (
     TBTCAnalysisTransform,
     TBTCBasicLayer,
@@ -49,6 +54,9 @@ __all__ = [
     "DWConv",
     "GatedFFN",
     "GatedTransformCNN",
+    "GLLMMNonLocalAttentionBlock",
+    "GLLMMResidualBottleneck",
+    "GLLMMResidualChain",
     "GroupedResidualDenseBlock",
     "LayerNorm2d",
     "LBHICResidualDenseBlock",

@@ -39,7 +39,10 @@ from compressai.entropy_models import (
     EntropyBottleneck,
     EntropyModel,
     GaussianConditional,
+    GaussianLaplaceLogisticMixtureConditional,
     GaussianMixtureConditional,
+    LaplaceConditional,
+    LogisticConditional,
 )
 from compressai.zoo import bmshj2018_factorized, bmshj2018_hyperprior
 
@@ -491,6 +494,76 @@ class TestGaussianMixtureConditional:
         assert y_likelihoods.shape == x.shape
 
         assert (y == torch.round(x)).all()
+
+
+class TestLaplaceConditional:
+    def test_standardized_cumulative(self):
+        model = LaplaceConditional(None)
+        x = torch.linspace(-8, 8, 33)
+        expected = torch.where(x < 0, 0.5 * torch.exp(x), 1 - 0.5 * torch.exp(-x))
+
+        assert torch.allclose(model._standardized_cumulative(x), expected)
+
+    def test_forward_training(self):
+        model = LaplaceConditional(None)
+        x = torch.rand(1, 16, 8, 8)
+        scales = torch.rand_like(x)
+        y, y_likelihoods = model(x, scales)
+
+        assert isinstance(model, EntropyModel)
+        assert y.shape == x.shape
+        assert y_likelihoods.shape == x.shape
+        assert (y_likelihoods > 0).all()
+
+
+class TestLogisticConditional:
+    def test_standardized_cumulative(self):
+        model = LogisticConditional(None)
+        x = torch.linspace(-8, 8, 33)
+
+        assert torch.allclose(model._standardized_cumulative(x), torch.sigmoid(x))
+
+    def test_forward_training(self):
+        model = LogisticConditional(None)
+        x = torch.rand(1, 16, 8, 8)
+        scales = torch.rand_like(x)
+        y, y_likelihoods = model(x, scales)
+
+        assert isinstance(model, EntropyModel)
+        assert y.shape == x.shape
+        assert y_likelihoods.shape == x.shape
+        assert (y_likelihoods > 0).all()
+
+
+class TestGaussianLaplaceLogisticMixtureConditional:
+    def test_forward_inference(self):
+        model = GaussianLaplaceLogisticMixtureConditional(K=3).eval()
+        channels = 4
+        x = torch.rand(1, channels, 4, 4)
+        means = torch.rand(1, 9 * channels, 4, 4)
+        scales = torch.rand(1, 9 * channels, 4, 4)
+
+        component_logits = torch.rand(1, 3, channels, 4, 4)
+        weights_g = component_logits.softmax(dim=1).flatten(1, 2)
+        weights_l = component_logits.softmax(dim=1).flatten(1, 2)
+        weights_lo = component_logits.softmax(dim=1).flatten(1, 2)
+        family_logits = torch.rand(1, 3, channels, 4, 4)
+        weights_family = family_logits.softmax(dim=1).flatten(1, 2)
+
+        y, y_likelihoods = model(
+            x,
+            means,
+            scales,
+            weights_g,
+            weights_l,
+            weights_lo,
+            weights_family,
+        )
+
+        assert y.shape == x.shape
+        assert y_likelihoods.shape == x.shape
+        assert (y == torch.round(x)).all()
+        assert (y_likelihoods > 0).all()
 
 
 class TestCausalContextAdjustmentEntropyModel:

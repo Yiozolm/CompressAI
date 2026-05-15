@@ -47,6 +47,7 @@ from compressai.models import (
     FrequencyAwareTransFormer,
     GainedMSHyperprior,
     GainedScaleHyperprior,
+    GLLMM,
     Informer,
     InvCompress,
     JointAutoregressiveHierarchicalPriors,
@@ -82,6 +83,7 @@ from compressai.zoo import (
     dcae,
     entroformer,
     ftic,
+    gllmm,
     hpcm,
     hpcm_base,
     hpcm_large,
@@ -446,6 +448,20 @@ class TestCandidateModels:
 
         with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
             nic(pretrained=True)
+
+    def test_gllmm(self):
+        net = gllmm(N=8)
+
+        assert isinstance(net, GLLMM)
+        assert net.N == 8
+        assert candidate_model_architectures["gllmm"] is GLLMM
+        assert isinstance(gllmm(quality=8, N=8), GLLMM)
+
+        with pytest.raises(ValueError):
+            gllmm(quality=2)
+
+        with pytest.raises(RuntimeError, match="Pre-trained model not yet available"):
+            gllmm(pretrained=True)
 
     def test_nvtc(self):
         net = nvtc(
