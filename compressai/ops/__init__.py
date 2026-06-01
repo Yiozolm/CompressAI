@@ -36,14 +36,21 @@ from .multiplex import (
     multiplex_v2,
     space2depth,
 )
-from .ops import compute_padding, quantize_ste
+from .ops import (
+    DiamondLatticeQuantizer,
+    compute_padding,
+    diamond_lattice_quantize,
+    quantize_ste,
+)
 from .parametrizers import NonNegativeParametrizer
 
 __all__ = [
     "compute_padding",
+    "diamond_lattice_quantize",
     "demultiplex",
     "demultiplex_v2",
     "depth2space",
+    "DiamondLatticeQuantizer",
     "multiplex",
     "multiplex_v2",
     "quantize_ste",

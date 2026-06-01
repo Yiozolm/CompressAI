@@ -31,7 +31,13 @@ import pytest
 import torch
 
 from compressai._CXX import pmf_to_quantized_cdf
-from compressai.ops import LowerBound, NonNegativeParametrizer, quantize_ste
+from compressai.ops import (
+    DiamondLatticeQuantizer,
+    LowerBound,
+    NonNegativeParametrizer,
+    diamond_lattice_quantize,
+    quantize_ste,
+)
 
 
 class TestQuantizeSTE:
@@ -45,6 +51,84 @@ class TestQuantizeSTE:
         y.backward(x)
         assert x.grad is not None
         assert (x.grad == x).all()
+
+
+class TestDiamondLatticeQuantizer:
+    @pytest.mark.parametrize("dtype", (torch.float32, torch.float64))
+    def test_diamond_lattice_quantize_shape(self, dtype):
+        x = torch.rand(2, 4, 3, 5, dtype=dtype)
+        y = diamond_lattice_quantize(x, round_mode="hard")
+        assert y.shape == x.shape
+        assert y.dtype == x.dtype
+        assert torch.isfinite(y).all()
+
+    def test_diamond_lattice_quantize_branch_index(self):
+        x = torch.rand(2, 4, 3, 5)
+        y, indexes = diamond_lattice_quantize(
+            x,
+            round_mode="hard",
+            return_indexes=True,
+        )
+        assert y.shape == x.shape
+        assert indexes.shape == (2, 3, 5)
+        assert indexes.dtype == torch.int64
+        assert ((indexes == 0) | (indexes == 1)).all()
+
+    def test_diamond_lattice_quantize_hard_nearest_coset(self):
+        x = torch.tensor([[[[0.49]], [[0.49]]], [[[0.10]], [[0.10]]]])
+        y, indexes = diamond_lattice_quantize(
+            x,
+            round_mode="hard",
+            return_indexes=True,
+        )
+
+        expected = torch.tensor([[[[0.50]], [[0.50]]], [[[0.00]], [[0.00]]]])
+        expected_indexes = torch.tensor([[[1]], [[0]]])
+        assert torch.equal(y, expected)
+        assert torch.equal(indexes, expected_indexes)
+
+    def test_diamond_lattice_quantize_ste_grad(self):
+        x = torch.rand(2, 4, 3, 5, requires_grad=True)
+        y = diamond_lattice_quantize(x, round_mode="ste")
+        y.sum().backward()
+
+        assert x.grad is not None
+        assert torch.allclose(x.grad, torch.ones_like(x))
+
+    def test_diamond_lattice_quantize_step_scaling(self):
+        x = torch.full((1, 2, 1, 1), 0.26)
+        y_step_1 = diamond_lattice_quantize(x, step=1.0, round_mode="hard")
+        y_step_half = diamond_lattice_quantize(x, step=0.5, round_mode="hard")
+
+        assert torch.equal(y_step_1, torch.full_like(x, 0.5))
+        assert torch.equal(y_step_half, torch.full_like(x, 0.25))
+
+    def test_diamond_lattice_quantize_channel_step(self):
+        x = torch.tensor([[[[0.26]], [[0.76]]]])
+        step = torch.tensor([0.5, 1.0])
+        y = diamond_lattice_quantize(x, step=step, round_mode="hard")
+
+        expected = torch.tensor([[[[0.25]], [[0.50]]]])
+        assert torch.equal(y, expected)
+
+    def test_diamond_lattice_quantizer_module(self):
+        x = torch.rand(2, 4, 3, 5)
+        quantizer = DiamondLatticeQuantizer(step=0.5, round_mode="hard")
+        expected = diamond_lattice_quantize(x, step=0.5, round_mode="hard")
+
+        assert torch.equal(quantizer(x), expected)
+
+    def test_diamond_lattice_quantize_invalid_config(self):
+        x = torch.rand(2, 4, 3, 5)
+
+        with pytest.raises(ValueError):
+            diamond_lattice_quantize(x, step=0.0)
+        with pytest.raises(ValueError):
+            diamond_lattice_quantize(x, round_mode="invalid")
+        with pytest.raises(ValueError):
+            diamond_lattice_quantize(x, block_axis="invalid")
+        with pytest.raises(ValueError):
+            diamond_lattice_quantize(torch.rand(4), block_axis="channel")
 
 
 class TestLowerBound:
