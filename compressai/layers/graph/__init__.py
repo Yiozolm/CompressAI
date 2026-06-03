@@ -7,11 +7,11 @@ from .graph import (
     IPGGrapher,
 )
 from .graph_gfa import (
+    GFA,
+    MGB,
     FeatureReshape,
     FeatureRestore,
-    GFA,
     GraphLayerStack,
-    MGB,
 )
 from .graph_ops import (
     compute_sobel_gradients,
