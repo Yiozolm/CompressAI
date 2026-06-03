@@ -27,13 +27,11 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from . import pointcloud
-from .cca import CCARateDistortionLoss
-from .pointcloud import *
-from .rate_distortion import RateDistortionLoss
+"""Application-layer helpers for assembling Family 1 channel-slice codecs.
 
-__all__ = [
-    *pointcloud.__all__,
-    "CCARateDistortionLoss",
-    "RateDistortionLoss",
-]
+Currently houses :mod:`~compressai.models._helpers.channel_context`, whose
+:class:`MeanScaleContextHead` provides the split mean / scale channel-context
+head shared by the Family 1 models (STF / WACNN / TCM / CCA). It lives
+outside ``compressai.latent_codecs`` because it is application-layer
+ergonomics, not a codec primitive.
+"""

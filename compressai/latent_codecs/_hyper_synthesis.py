@@ -27,13 +27,34 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from . import pointcloud
-from .cca import CCARateDistortionLoss
-from .pointcloud import *
-from .rate_distortion import RateDistortionLoss
+import torch
+import torch.nn as nn
+
+from torch import Tensor
 
 __all__ = [
-    *pointcloud.__all__,
-    "CCARateDistortionLoss",
-    "RateDistortionLoss",
+    "DualHyperSynthesis",
 ]
+
+
+class DualHyperSynthesis(nn.Module):
+    """Concatenate outputs of two parallel hyper-synthesis heads.
+
+    Channel-slice models in Family 1 (STF, WACNN, TCM, CCA, ...) factor the
+    hyperprior as ``params = cat(h_mean_s(z_hat), h_scale_s(z_hat))``. Pass
+    an instance as the ``h_s`` argument of
+    :class:`~compressai.latent_codecs.HyperpriorLatentCodec` to fold both
+    heads into the codec while keeping their state-dict paths separate
+    (``h_s.h_mean_s.*`` / ``h_s.h_scale_s.*``).
+    """
+
+    h_mean_s: nn.Module
+    h_scale_s: nn.Module
+
+    def __init__(self, h_mean_s: nn.Module, h_scale_s: nn.Module) -> None:
+        super().__init__()
+        self.h_mean_s = h_mean_s
+        self.h_scale_s = h_scale_s
+
+    def forward(self, z_hat: Tensor) -> Tensor:
+        return torch.cat([self.h_mean_s(z_hat), self.h_scale_s(z_hat)], dim=1)
