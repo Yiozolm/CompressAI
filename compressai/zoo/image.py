@@ -98,6 +98,7 @@ __all__ = [
     "shiftlic_large",
     "weconvene",
     "ftic",
+    "invcompress",
 ]
 
 model_architectures = {
@@ -128,6 +129,7 @@ model_architectures = {
     "shiftlic-large": _LazyImport("compressai.models.shiftlic", "ShiftLIC"),
     "weconvene": _LazyImport("compressai.models.weconvene", "WeConvene"),
     "ftic": _LazyImport("compressai.models.ftic", "FrequencyAwareTransFormer"),
+    "invcompress": _LazyImport("compressai.models.invcompress", "InvCompress"),
 }
 
 root_url = "https://compressai.s3.amazonaws.com/models/v1"
@@ -738,6 +740,31 @@ def ftic(pretrained: bool = False, progress: bool = True, **kwargs):
     from compressai.models.ftic import FrequencyAwareTransFormer
 
     return FrequencyAwareTransFormer(**kwargs)
+
+
+def invcompress(pretrained: bool = False, progress: bool = True, **kwargs):
+    r"""InvCompress model from Y. Xie, K.L. Cheng, Q. Chen: `"Enhanced
+    Invertible Encoding for Learned Image Compression"
+    <https://arxiv.org/abs/2108.03690>`_, ACM Int. Conf. on Multimedia
+    (ACMMM), 2021.
+
+    Args:
+        pretrained (bool): If True, returns a pre-trained model. Currently
+            unavailable; raises ``RuntimeError``.
+        progress (bool): If True, displays a progress bar of the download to
+            stderr.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError(
+            "Pre-trained InvCompress weights are not mirrored on S3. Download "
+            "an upstream checkpoint and load it via "
+            "`InvCompress.from_state_dict(...)` (see "
+            "examples/convert_invcompress_checkpoint.py)."
+        )
+    from compressai.models.invcompress import InvCompress
+
+    return InvCompress(**kwargs)
 
 
 def stf(pretrained: bool = False, progress: bool = True, **kwargs):
