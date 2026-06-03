@@ -13,6 +13,7 @@ from .inference import (
     infer_swatten_head_dim,
     infer_swatten_window_size,
 )
+from .nsa import BasicViTLayer, NSABlock, ResViTBlock
 from .swin import (
     WMSA,
     ConvTransBlock,
@@ -30,6 +31,7 @@ from .swin import (
 )
 
 __all__ = [
+    "BasicViTLayer",
     "ConvTransBlock",
     "ConvWithDW",
     "ConvolutionalGLU",
@@ -37,8 +39,10 @@ __all__ = [
     "DenseBlock",
     "MultiScaleAggregation",
     "MutiScaleDictionaryCrossAttentionGLU",
+    "NSABlock",
     "PatchMerging",
     "PatchSplit",
+    "ResViTBlock",
     "SWAtten",
     "Scale",
     "SpatialAttentionModule",
