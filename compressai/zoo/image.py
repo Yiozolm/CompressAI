@@ -114,6 +114,8 @@ model_architectures = {
     "mlicplus": _LazyImport("compressai.models.mlic", "MLICPlus"),
     "mlicpp": _LazyImport("compressai.models.mlic", "MLICPlusPlus"),
     "mlicv2": _LazyImport("compressai.models.mlic", "MLICv2"),
+    "mambaic": _LazyImport("compressai.models.mambaic", "MambaIC"),
+    "cmic": _LazyImport("compressai.models.cmic", "CMIC"),
 }
 
 root_url = "https://compressai.s3.amazonaws.com/models/v1"
@@ -564,6 +566,54 @@ def glic(pretrained: bool = False, progress: bool = True, **kwargs):
     from compressai.models.glic import GLIC
 
     return GLIC(**kwargs)
+
+
+def mambaic(pretrained: bool = False, progress: bool = True, **kwargs):
+    r"""MambaIC model from F. Zeng, H. Tang, Y. Shao, S. Chen, L. Shao,
+    Y. Wang: "MambaIC: State Space Models for High-Performance Learned Image
+    Compression", IEEE/CVF Conf. on Computer Vision and Pattern Recognition
+    (CVPR), 2025.
+
+    Uses VSS (visual state-space) transforms. A CUDA selective-scan kernel or
+    ``mamba_ssm`` (``pip install compressai[ssm]``, Linux only) accelerates the
+    scan; elsewhere a pure-PyTorch fallback is used automatically.
+
+    Args:
+        pretrained (bool): If True, returns a pre-trained model. Currently
+            unavailable; raises ``RuntimeError``.
+        progress (bool): If True, displays a progress bar of the download to
+            stderr.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained MambaIC weights are not yet hosted on S3.")
+    from compressai.models.mambaic import MambaIC
+
+    return MambaIC(**kwargs)
+
+
+def cmic(pretrained: bool = False, progress: bool = True, **kwargs):
+    r"""CMIC model from Y. Chen, Z. Hu, et al.: "Content-Aware Mamba for
+    Learned Image Compression", Int. Conf. on Learning Representations (ICLR),
+    2026.
+
+    Requires the optional ``pytorch_wavelets`` extra (``pip install
+    compressai[wavelet]``) for the AuxT wavelet branches; a CUDA selective-scan
+    kernel or ``mamba_ssm`` (``compressai[ssm]``, Linux only) accelerates the
+    content-aware Mamba blocks, with a pure-PyTorch fallback otherwise.
+
+    Args:
+        pretrained (bool): If True, returns a pre-trained model. Currently
+            unavailable; raises ``RuntimeError``.
+        progress (bool): If True, displays a progress bar of the download to
+            stderr.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained CMIC weights are not yet hosted on S3.")
+    from compressai.models.cmic import CMIC
+
+    return CMIC(**kwargs)
 
 
 def stf(pretrained: bool = False, progress: bool = True, **kwargs):
