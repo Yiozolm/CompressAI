@@ -153,6 +153,16 @@
 
 **Done** —— 9 phase 全部落地。
 
+> **上游迁入更新（2026-06-03，PR #6 已合并到 `Yiozolm/CompressAI` master，merge commit `2f453cb`）**：本计划描述的是 `script` 主干上 `candidate/ → compressai/` 的原始集成。把同一套件从 `script` 迁入上游 `master` 时按上游约定做了几处调整，**与上述 Status 描述不同**：
+> - **deep-import-only**：`ResViTBlock` 走 `compressai.layers.attn`，`conv`/`deconv` 走 `compressai.models.utils`（master `layers/__init__` 不 star-export attn/lic 子包）。
+> - **不加 `[tinylic]` natten extra**：vendored 纯 PyTorch `NeighborhoodAttention` 始终被使用，PyPI `natten` 只探测从不 import，声明 extra 会引入代码从不消费的依赖。NSA 走现有 `[attn]` extra 的 timm。
+> - **natten 落点**为 `compressai/layers/attn/natten/`（不是 `compressai/layers/natten/`）。
+> - **ShiftLIC shift blocks 内联**在 `compressai/models/shiftlic.py`（不再独立 `compressai/layers/lic/shift.py`；ShiftLIC 独占，仿 CMIC inline-private-blocks 先例）。
+> - **convert-to-examples**：model 删除 `load_state_dict` override，`from_state_dict` 纯 shape 推断；top-level 熵 key → `latent_codec.*` 的 remap 移进 `examples/convert_{tinylic,shiftlic}_checkpoint.py` 的 `convert_upstream_*_state_dict` 自由函数（对齐全部已合并 Family-2 模型）。
+> - **hyperprior 不容器化**：保留手写 forward + 顶层 `entropy_bottleneck`/`h_a`/`h_s`（仿 MambaIC）；因为 ShiftLIC small/middle 喂 `abs(y)` 给 hyperencoder，`HyperpriorLatentCodec.forward` 表达不了，且 TinyLIC 有真实权重需保 key fidelity。
+> - 测试落在 `tests/test_models.py::{TestTinyLIC,TestShiftLIC}` + `tests/test_layers.py::{TestNSA,TestMultiplex,TestMultistageMaskedConv2d}`（不是 `TestCandidateModels`）。
+> - 全量 `pytest tests/` 387 passed（2 个 pre-existing 失败：DDP socket + Cheng2020 联网下载，与本 PR 无关）。
+
 - TinyLIC + ShiftLIC small/middle/large 共 4 个 zoo entry 已注册，对应模型在 `compressai/models/{tinylic,shiftlic}.py`
 - 通用 codec `compressai/latent_codecs/multistage_checkerboard.py::MultistageCheckerboardLatentCodec` 同时服务 TinyLIC 与 ShiftLIC large
 - 共享层：`compressai/layers/layers.py::MultistageMaskedConv2d`、`compressai/layers/attn/nsa.py`（NSABlock / BasicViTLayer / ResViTBlock）、`compressai/layers/lic/shift.py`（Shift4 / ResidualBlockShift / CheapCS1 / ResidualShiftStack）、`compressai/layers/natten/`（lazy router + nattentorch fallback）、`compressai/ops/multiplex.py`

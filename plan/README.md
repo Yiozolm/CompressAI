@@ -52,7 +52,7 @@
 - [dcae-saaf-auxt-containerization.md](exec-plans/completed/dcae-saaf-auxt-containerization.md) — `pr-dcae-saaf-auxt` 容器化迁入完成（2026-05-12，HEAD `819e10b`）：新增 dictionary cross-attention helper 与 DCAE / SAAF 容器化模型，落地 AuxT OLP/WLS/iWLS primitives、TCM `use_auxt=True` opt-in、`[wavelet]` optional dep、zoo 接线与真实 candidate checkpoint smoke；已 push 到 origin/pr-dcae-saaf-auxt
 - [sga-codec-generalization.md](exec-plans/completed/sga-codec-generalization.md) — SGA quantizer 接入面扩展完成（2026-05-11，commit `9cdcb05`）：把 `quantizer="sga"` 推广到 `GaussianConditionalLatentCodec` / `CheckerboardLatentCodec`，并通过父类继承覆盖 `LRPGaussianLatentCodec`；Checkerboard 保持默认 STE、可选 SGA，覆盖 ELIC reconstruction/context `y_hat` 路径；上游无对应 ckpt 可做 ELIC checkpoint 回归，本地 targeted tests 25 passed
 - [tbtc-integration.md](exec-plans/completed/tbtc-integration.md) — TBTC (ICLR 2022) 四模型迁入完成（2026-05-13，commit `89a1723`）：新增 Conv-Hyperprior / Conv-ChARM / SwinT-Hyperprior / SwinT-ChARM，复用现有 entropy 基础设施，新增 TBTC 专用 BHWC Swin transform 与 ChARM slice adapter；checkpoint 转换与真实 ckpt 数值对齐保留为后续项
-- [shiftlic-tinylic-integration.md](exec-plans/completed/shiftlic-tinylic-integration.md) — TinyLIC + ShiftLIC small/middle/large 集成（共享 `MultistageCheckerboardLatentCodec`）
+- [shiftlic-tinylic-integration.md](exec-plans/completed/shiftlic-tinylic-integration.md) — TinyLIC + ShiftLIC small/middle/large 集成（共享 `MultistageCheckerboardLatentCodec`）；**已上游迁入 `Yiozolm/CompressAI` master，PR #6（2026-06-03，merge `2f453cb`）**——见该文档 Status 的上游迁入更新（deep-import / 无 natten extra / shift blocks 内联 / convert-to-examples）
 - [mlicpp-latent-codec-refactor.md](exec-plans/completed/mlicpp-latent-codec-refactor.md) — 把 MLIC++ 的通道/上下文熵建模抽成 `MLICPlusPlusLatentCodec`
 - [nvtc-compressai-port.md](exec-plans/completed/nvtc-compressai-port.md) — NVTC (CVPR 2023) 迁入 CompressAI：纯 `CompressionModel` forward/rate-estimation、VQ likelihood、state_dict 推断与 zoo 注册；上游 practical entropy coding 仍未实现
 
@@ -62,6 +62,7 @@
 - [pr-mlicpp-draft.md](generated/pr-mlicpp-draft.md) — `pr-mlicpp` 分支的 PR 描述草稿（MLIC family + MultiContextCheckerboardLatentCodec）
 - [pr-glic-draft.md](generated/pr-glic-draft.md) — `pr-glic` 分支的 PR 描述草稿（GLIC + graph 子包）
 - [pr-mambaic-cmic-draft.md](generated/pr-mambaic-cmic-draft.md) — `pr-mambaic-cmic` 分支的 PR 描述草稿（MambaIC + CMIC + SSM 子包，PR #5）
+- [pr-tinylic-shiftlic-draft.md](generated/pr-tinylic-shiftlic-draft.md) — `pr-tinylic-shiftlic` 分支的 PR 描述草稿（TinyLIC + ShiftLIC + 共享 `MultistageCheckerboardLatentCodec`，PR #6）
 
 ### references/
 

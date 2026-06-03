@@ -1,5 +1,13 @@
 # CompressAI LIC 迁移路线图
 
+## 上游迁入进度（`Yiozolm/CompressAI` master）
+
+> 本路线图是候选池总盘 + 推荐顺序；逐 PR 的细节状态在 `plan/exec-plans/` 各 plan 里。已合并到上游 master 的模型：
+>
+> - **STF / WACNN**（PR #3 系），**LIC_TCM / CCA**（pr-tcm-cca），**DCAE / SAAF**（pr-dcae-saaf-auxt），**MLIC ×4**（pr-mlicpp），**GLIC**（PR #4），**MambaIC / CMIC**（PR #5），**TinyLIC / ShiftLIC small/middle/large**（PR #6，2026-06-03，merge `2f453cb`，共享 `MultistageCheckerboardLatentCodec`）。
+> - **不迁入**：`2024-MambaVC`（仅 arXiv 预印本，未同行评审，见 §E.14 / Phase 11）。
+> - **剩余候选**：`WeConvene`（Phase 10）、`ICLR2024-FTIC`（Phase 8）、`InvCompress`（Phase 9）；`AuxT`（共享层，已随 pr-dcae-saaf-auxt 落地）、`CCA`（已落地）。
+
 ## 本轮勘察结论
 
 - 当前图像模型的稳定落点在 `compressai/models/`，基础抽象在 `compressai/models/base.py`。
@@ -113,11 +121,12 @@
     - 文件巨大，外部依赖重
     - License：**无**
 
-14. `2024-MambaVC`
+14. `2024-MambaVC` — ❌ **不迁入（won't-do，2026-06-03 决策）**
+    - **原因：仅 arXiv 预印本，未经同行评审正式发表**，不纳入上游迁入范围
     - `MambaVC.py` **1618 行**（最大单文件候选），`csm_triton.py` 338 行
     - 同时依赖 `selective_scan_cuda_oflex` / `selective_scan_cuda_core` / `selective_scan_cuda` 三个 CUDA 扩展（代码里自带 try/except 回退）
     - License：**无**
-    - 与 `MambaIC` 的 SSM 路径高度重叠，建议**二选一或合并处理**，不要并行迁移两套 selective-scan
+    - 与 `MambaIC` 的 SSM 路径高度重叠；MambaIC（CVPR 2025）已迁入并落地共享 `compressai/layers/ssm/`，SSM 家族需求已被覆盖，MambaVC 不再有迁入价值
 
 ## 推荐迁移顺序
 
@@ -338,17 +347,14 @@
 - `CCA`：定位为 **loss / auxiliary entropy 方法**而非独立模型 zoo entry；落点 `compressai/losses/` 或 `compressai/entropy_models/` 的扩展，不走 `@register_model`
 - `AuxT`：定位为 **共享模块来源**；`WLS` / `iWLS` / `OLP` / `GatedTransformCNN` 已在 Phase 0 抽入 `compressai/layers/lic/`，不单独注册 model entry
 
-### Phase 11：最后处理 `MambaIC` + `MambaVC`（合并）
+### Phase 11：`MambaIC` ✅ 已迁入；`MambaVC` ❌ 不迁入
 
-**合并处理原则**：两者都依赖 `selective_scan` 系列 CUDA kernel（`MambaIC` 用 `SS2D` + Triton；`MambaVC` 用 `selective_scan_cuda_oflex` / `core` / 原版三档回退），SSM 前向核心 **几乎是同一套**，不要并行维护两套。
+**MambaIC**（CVPR 2025）已于 2026-06-03 迁入 upstream（Family-2 PR #5），共享层 `compressai/layers/ssm/` 已落地（`SS2D` / `VSSBlock` / `selective_scan` 三档回退）。
 
-步骤建议：
-
-1. 先抽一份 `compressai/layers/ssm/ssm.py`（已落地，2026-04 从 `lic/` 拆出），承载 `SS2D` / `VSSBlock` / `SelectiveScan*` 封装 + 统一 try/except 回退逻辑
-2. 在 `ssm.py` 内部做依赖分档：`selective_scan_cuda*` > `triton` > 纯 PyTorch fallback；对应 `@register_model` 的能力也按能力级 gate
-3. 决策二选一还是都入：若两篇 paper 结构差异足够大（MambaIC 偏 channel-wise，MambaVC 偏 2D scan），两个都入；否则只保留 `MambaIC`（文件更小）
-4. License 两者均缺失，合入前需要先确认
-5. 若无可维护 fallback，不建议先入主线
+**MambaVC**（2024，arXiv 预印本）**决策不迁入**（2026-06-03）：
+- **核心原因**：仅 arXiv 预印本，未经同行评审正式发表，不纳入上游迁入范围
+- SSM 家族需求已由 MambaIC 落地的 `compressai/layers/ssm/` 覆盖，MambaVC 与其 selective-scan 路径高度重叠，无额外迁入价值
+- 1618 行最大单文件 + 三个 CUDA 扩展依赖 + License 缺失，成本/收益不成比例
 
 ## 代码组织建议
 
@@ -447,4 +453,4 @@
 4. 旧风格复杂模型：`DCAE`（Phase 6）→ `SAAF`（Phase 7）
 5. novelty 模型：`FTIC`（Phase 8，entropy 模块）→ `InvCompress`（Phase 9，可逆层）
 6. Phase 10 处理 `WeConvene`、`CCA`（→ losses/aux）、`AuxT`（→ 仅共享层）
-7. Phase 11：合并评估 `MambaIC` + `MambaVC`（共享 `ssm.py`），最后决定是否入主线
+7. Phase 11：`MambaIC` ✅ 已迁入（PR #5，共享 `ssm.py`）；`MambaVC` ❌ 不迁入（仅 arXiv 预印本）
