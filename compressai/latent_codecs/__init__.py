@@ -36,6 +36,7 @@ from .gain import GainHyperLatentCodec, GainHyperpriorLatentCodec
 from .gaussian_conditional import GaussianConditionalLatentCodec, LRPGaussianLatentCodec
 from .hyper import HyperLatentCodec
 from .hyperprior import HyperpriorLatentCodec
+from .multi_context_checkerboard import MultiContextCheckerboardLatentCodec
 from .rasterscan import RasterScanLatentCodec
 
 __all__ = [
@@ -50,6 +51,7 @@ __all__ = [
     "HyperLatentCodec",
     "HyperpriorLatentCodec",
     "LRPGaussianLatentCodec",
+    "MultiContextCheckerboardLatentCodec",
     "RasterScanLatentCodec",
 ]
 

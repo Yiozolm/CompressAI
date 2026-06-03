@@ -29,7 +29,7 @@
 
 import math
 
-from typing import Any, Tuple
+from typing import Any, Tuple, Type
 
 import torch
 import torch.nn as nn
@@ -187,6 +187,12 @@ def conv1x1(in_ch: int, out_ch: int, stride: int = 1) -> nn.Module:
     return nn.Conv2d(in_ch, out_ch, kernel_size=1, stride=stride)
 
 
+def _make_activation(act: Type[nn.Module]) -> nn.Module:
+    if act is nn.LeakyReLU:
+        return act(inplace=True)
+    return act()
+
+
 class ResidualBlockWithStride(nn.Module):
     """Residual block with a stride on the first convolution.
 
@@ -194,12 +200,19 @@ class ResidualBlockWithStride(nn.Module):
         in_ch (int): number of input channels
         out_ch (int): number of output channels
         stride (int): stride value (default: 2)
+        act (Type[nn.Module]): activation layer (default: nn.LeakyReLU)
     """
 
-    def __init__(self, in_ch: int, out_ch: int, stride: int = 2):
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        stride: int = 2,
+        act: Type[nn.Module] = nn.LeakyReLU,
+    ):
         super().__init__()
         self.conv1 = conv3x3(in_ch, out_ch, stride=stride)
-        self.leaky_relu = nn.LeakyReLU(inplace=True)
+        self.leaky_relu = _make_activation(act)
         self.conv2 = conv3x3(out_ch, out_ch)
         self.gdn = GDN(out_ch)
         if stride != 1 or in_ch != out_ch:
@@ -228,12 +241,19 @@ class ResidualBlockUpsample(nn.Module):
         in_ch (int): number of input channels
         out_ch (int): number of output channels
         upsample (int): upsampling factor (default: 2)
+        act (Type[nn.Module]): activation layer (default: nn.LeakyReLU)
     """
 
-    def __init__(self, in_ch: int, out_ch: int, upsample: int = 2):
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        upsample: int = 2,
+        act: Type[nn.Module] = nn.LeakyReLU,
+    ):
         super().__init__()
         self.subpel_conv = subpel_conv3x3(in_ch, out_ch, upsample)
-        self.leaky_relu = nn.LeakyReLU(inplace=True)
+        self.leaky_relu = _make_activation(act)
         self.conv = conv3x3(out_ch, out_ch)
         self.igdn = GDN(out_ch, inverse=True)
         self.upsample = subpel_conv3x3(in_ch, out_ch, upsample)
@@ -255,12 +275,18 @@ class ResidualBlock(nn.Module):
     Args:
         in_ch (int): number of input channels
         out_ch (int): number of output channels
+        act (Type[nn.Module]): activation layer (default: nn.LeakyReLU)
     """
 
-    def __init__(self, in_ch: int, out_ch: int):
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        act: Type[nn.Module] = nn.LeakyReLU,
+    ):
         super().__init__()
         self.conv1 = conv3x3(in_ch, out_ch)
-        self.leaky_relu = nn.LeakyReLU(inplace=True)
+        self.leaky_relu = _make_activation(act)
         self.conv2 = conv3x3(out_ch, out_ch)
         if in_ch != out_ch:
             self.skip = conv1x1(in_ch, out_ch)

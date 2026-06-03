@@ -35,7 +35,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from compressai.entropy_models import GaussianConditional
-from compressai.ops import quantize_ste
+from compressai.ops import SGAQuantizer, quantize_ste
 from compressai.registry import register_module
 
 from .base import LatentCodec
@@ -87,11 +87,17 @@ class GaussianConditionalLatentCodec(LatentCodec):
         gaussian_conditional: Optional[GaussianConditional] = None,
         entropy_parameters: Optional[nn.Module] = None,
         quantizer: str = "noise",
+        sga: Optional[SGAQuantizer] = None,
         chunks: Tuple[str, ...] = ("scales", "means"),
         **kwargs,
     ):
         super().__init__()
+        if quantizer not in ("noise", "ste", "sga"):
+            raise ValueError(f'Invalid quantizer "{quantizer}"')
+        if quantizer == "sga" and sga is None:
+            raise ValueError('quantizer="sga" requires the `sga` argument')
         self.quantizer = quantizer
+        self.sga = sga
         self.gaussian_conditional = gaussian_conditional or GaussianConditional(
             scale_table, **kwargs
         )
@@ -102,7 +108,11 @@ class GaussianConditionalLatentCodec(LatentCodec):
         gaussian_params = self.entropy_parameters(ctx_params)
         scales_hat, means_hat = self._chunk(gaussian_params)
         y_hat, y_likelihoods = self.gaussian_conditional(y, scales_hat, means=means_hat)
-        if self.quantizer == "ste":
+        if self.quantizer == "sga":
+            assert self.sga is not None
+            y_hat = self.sga(y - means_hat) + means_hat
+            y_likelihoods = self._likelihood_for_quantized(y_hat, gaussian_params)
+        elif self.quantizer == "ste":
             y_hat = quantize_ste(y - means_hat) + means_hat
         return {"likelihoods": {"y": y_likelihoods}, "y_hat": y_hat}
 
@@ -144,6 +154,14 @@ class GaussianConditionalLatentCodec(LatentCodec):
         if self.chunks == ("means", "scales"):
             means, scales = params.chunk(2, 1)
         return scales, means
+
+    def _likelihood_for_quantized(self, y_hat: Tensor, params: Tensor) -> Tensor:
+        """Compute Gaussian likelihood for an already-quantized ``y_hat``."""
+        scales, means = self._chunk(params)
+        likelihood = self.gaussian_conditional._likelihood(y_hat, scales, means)
+        if self.gaussian_conditional.use_likelihood_bound:
+            likelihood = self.gaussian_conditional.likelihood_lower_bound(likelihood)
+        return likelihood
 
 
 @register_module("LRPGaussianLatentCodec")

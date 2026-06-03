@@ -82,6 +82,7 @@ pointcloud = [
   "pyntcloud-yoda",
 ]
 attn = [
+  # Swin/STF/TCM/CCA and the MLIC family use timm attention/norm layers.
   "timm",
 ]
 wavelet = [
