@@ -23,7 +23,11 @@ jobs:
         python-version: ${{ matrix.python-version }}
 
     - name: Install the project
-      run: uv sync --reinstall --locked --all-extras --dev
+      # Exclude the `ssm` extra: mamba-ssm has no pure-Python wheel and its
+      # setup.py needs nvcc (absent on the CPU runner), so building it fails.
+      # MambaIC / CMIC fall back to the pure-PyTorch selective-scan path, so
+      # their tests still run without it.
+      run: uv sync --reinstall --locked --all-extras --no-extra ssm --dev
 
     - name: Run unit tests
       run: uv run pytest -m "not slow" --cov=compressai -s tests/
