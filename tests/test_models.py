@@ -2643,6 +2643,137 @@ class TestFTIC:
         assert set(loaded.state_dict().keys()) == set(native.keys())
 
 
+class TestInvCompress:
+    def test_invcompress_forward_and_state_dict_round_trip(self):
+        pytest.importorskip("FrEIA")
+        from compressai.models.invcompress import InvCompress
+
+        model = InvCompress(N=96).eval()
+
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            out = model(x)
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 96, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 96, 1, 1)
+
+        sd_keys = set(model.state_dict().keys())
+        # Invertible transform routed through FrEIA backends.
+        assert "inv.operations.1.backend.M" in sd_keys
+        assert "inv.operations.2.backend.subnet1.conv1.weight" in sd_keys
+        # Attention squeeze + feature enhancement modules.
+        assert any(k.startswith("attention.forw_att.") for k in sd_keys)
+        assert any(k.startswith("enh.forw_enh.") for k in sd_keys)
+        # No upstream-only keys leaked into the native layout.
+        assert "inv.operations.1.weight" not in sd_keys
+        assert not any(".G1." in k for k in sd_keys)
+
+        loaded = InvCompress.from_state_dict(model.state_dict()).eval()
+        assert loaded.N == model.N
+        assert loaded.M == model.M
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+
+    def test_invcompress_compress_decompress_round_trip(self):
+        pytest.importorskip("FrEIA")
+        from compressai.models.invcompress import InvCompress
+
+        model = InvCompress(N=96).eval()
+        model.update(force=True)
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            enc = model.compress(x)
+            dec = model.decompress(enc["strings"], enc["shape"])
+        assert len(enc["strings"]) == 2  # [y_strings, z_strings]
+        assert len(enc["strings"][0]) == x.size(0)
+        assert len(enc["strings"][1]) == x.size(0)
+        assert dec["x_hat"].shape == x.shape
+
+    @staticmethod
+    def _native_to_upstream(native):
+        """Invert the converter's renames to synthesize an upstream-flat layout
+        from a compressai-native InvCompress state dict.
+
+        Mirrors ``convert_upstream_invcompress_state_dict``: the FrEIA
+        ``Fixed1x1Conv`` ``M`` buffer becomes the bare ``inv.operations.{i}.weight``
+        matrix, and each fused ``GLOWCouplingBlock`` ``subnet{1,2}`` is split back
+        into the two parallel ``G``/``H`` bottlenecks (``conv1`` row-split,
+        ``conv2``/``conv3`` un-block-diagonalized).
+        """
+        upstream = {}
+        for key, value in native.items():
+            if not key.startswith("inv.operations."):
+                upstream[key] = value
+                continue
+            parts = key.split(".")
+            idx = parts[2]
+            rest = parts[4:]  # drop "inv.operations.{idx}.backend"
+            if rest == ["M"]:
+                upstream[f"inv.operations.{idx}.weight"] = value.view(
+                    value.size(0), value.size(1)
+                )
+            elif rest in (["M_inv"], ["logDetM"]):
+                # Re-derived from the weight matrix upstream; not stored.
+                continue
+            elif rest[0] in ("subnet1", "subnet2"):
+                subnet, conv, param = rest
+                scale_id = "G1" if subnet == "subnet1" else "G2"
+                shift_id = "H1" if subnet == "subnet1" else "H2"
+                if conv == "conv1" or param == "bias":
+                    half = value.size(0) // 2
+                    upstream[f"inv.operations.{idx}.{scale_id}.{conv}.{param}"] = value[
+                        :half
+                    ].clone()
+                    upstream[f"inv.operations.{idx}.{shift_id}.{conv}.{param}"] = value[
+                        half:
+                    ].clone()
+                else:  # conv2/conv3 weight: block-diagonal
+                    out_half = value.size(0) // 2
+                    in_half = value.size(1) // 2
+                    upstream[f"inv.operations.{idx}.{scale_id}.{conv}.{param}"] = value[
+                        :out_half, :in_half
+                    ].clone()
+                    upstream[f"inv.operations.{idx}.{shift_id}.{conv}.{param}"] = value[
+                        out_half:, in_half:
+                    ].clone()
+            else:
+                raise AssertionError(f"unexpected native key: {key}")
+        return upstream
+
+    def test_invcompress_upstream_state_dict_conversion(self):
+        pytest.importorskip("FrEIA")
+        from compressai.models.invcompress import InvCompress
+
+        convert_fn = _load_convert_fn(
+            "convert_invcompress_checkpoint.py",
+            "convert_upstream_invcompress_state_dict",
+        )
+        is_upstream_layout = _load_convert_fn(
+            "convert_invcompress_checkpoint.py",
+            "_is_upstream_invcompress_state_dict",
+        )
+
+        model = InvCompress(N=96)
+        native = model.state_dict()
+        upstream = self._native_to_upstream(native)
+
+        assert is_upstream_layout(upstream)
+        assert "inv.operations.1.weight" in upstream
+        assert any(".G1." in k for k in upstream)
+
+        converted = convert_fn(upstream)
+        assert "inv.operations.1.backend.M" in converted
+        assert "inv.operations.2.backend.subnet1.conv1.weight" in converted
+        assert not any(".G1." in k for k in converted)
+        assert "inv.operations.1.weight" not in converted
+
+        loaded = InvCompress.from_state_dict(converted).eval()
+        assert loaded.N == model.N
+        assert loaded.M == model.M
+        assert set(loaded.state_dict().keys()) == set(native.keys())
+
+
 def test_scale_table_default():
     table = get_scale_table()
     assert SCALES_MIN == 0.11
