@@ -2429,6 +2429,220 @@ class TestWeConvene:
         assert loaded.use_residual_attention
 
 
+class TestFTIC:
+    def _tiny_kwargs(self):
+        # g_a applies three stride-2 stages, so a 64x64 input yields a 4x4
+        # latent. window_size=4 divides that; the hyper transforms downsample
+        # twice more (hyper_window_size=2 divides the 1x1 hyper latent after
+        # padding).
+        return dict(
+            config=(1, 1, 1, 1, 1, 1),
+            num_heads=(4, 4, 8, 8, 4, 4),
+            feature_dims=(16, 24, 32),
+            hyper_hidden_channels=32,
+            hyper_channels=16,
+            M=32,
+            num_slices=4,
+            hyper_num_heads=8,
+            tca_depth=2,
+            tca_ratio=2,
+            tca_num_heads=16,
+            window_size=4,
+            fm_window_size=8,
+            hyper_window_size=2,
+            hyper_fm_window_size=4,
+        )
+
+    def test_ftic_forward_and_state_dict_round_trip(self):
+        pytest.importorskip("timm")
+        from compressai.models.ftic import FrequencyAwareTransFormer
+
+        model = FrequencyAwareTransFormer(**self._tiny_kwargs()).eval()
+
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            out = model(x)
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == (1, 32, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 16, 1, 1)
+
+        sd_keys = set(model.state_dict().keys())
+        # FAT analysis/synthesis backbone + hyper bottleneck.
+        assert "g_a.input_block.conv1.weight" in sd_keys
+        assert "g_a.stage1.blocks.0.frequency_attention.qkv.weight" in sd_keys
+        assert "g_a.stage3.tail.weight" in sd_keys
+        assert "entropy_bottleneck.quantiles" in sd_keys
+        # T-CA entropy model + shifted Gaussian.
+        assert "tca.tca.layers.0.q_proj.weight" in sd_keys
+        assert "tca.hyper_trans.weight" in sd_keys
+        assert "gaussian_conditional.scale_table" in sd_keys
+        # No flat-Sequential / upstream-only keys leaked into the native layout.
+        assert "g_a.0.conv1.weight" not in sd_keys
+        assert not any(k.startswith("tca.TCA.") for k in sd_keys)
+        assert not any("_entropy_model." in k for k in sd_keys)
+
+        loaded = FrequencyAwareTransFormer.from_state_dict(model.state_dict()).eval()
+        assert loaded.M == model.M
+        assert loaded.num_slices == model.num_slices
+        assert loaded.config == model.config
+        assert loaded.num_heads == model.num_heads
+        assert loaded.tca_depth == model.tca_depth
+        assert loaded.tca_ratio == model.tca_ratio
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+
+    def test_ftic_compress_decompress_round_trip(self):
+        pytest.importorskip("timm")
+        from compressai.models.ftic import FrequencyAwareTransFormer
+
+        model = FrequencyAwareTransFormer(**self._tiny_kwargs()).eval()
+        model.update(force=True)
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            enc = model.compress(x)
+            dec = model.decompress(enc["strings"], enc["shape"])
+        assert len(enc["strings"]) == 2  # [y_strings, z_strings]
+        assert len(enc["strings"][0]) == model.num_slices
+        assert len(enc["strings"][1]) == x.size(0)
+        assert dec["x_hat"].shape == x.shape
+
+    def test_ftic_upstream_state_dict_conversion(self):
+        pytest.importorskip("timm")
+        from compressai.models.ftic import FrequencyAwareTransFormer
+
+        convert_fn = _load_convert_fn(
+            "convert_ftic_checkpoint.py", "convert_upstream_ftic_state_dict"
+        )
+        is_upstream_layout = _load_convert_fn(
+            "convert_ftic_checkpoint.py", "_is_upstream_layout"
+        )
+
+        model = FrequencyAwareTransFormer(**self._tiny_kwargs())
+        native = model.state_dict()
+
+        # Invert the converter's renames to synthesize an upstream-layout
+        # state_dict: nested input_block/stage*.blocks/stage*.tail -> flat
+        # nn.Sequential indices, conv1/conv2 -> conv1_1/conv1_2,
+        # frequency_attention -> trans_block (branch_attentions -> attns,
+        # frequency_modulation -> fm), tca.tca.* -> tca.TCA.* (q_proj/k_proj/
+        # v_proj -> q1/k1/v1, attention -> attn, positional_encoding -> cpe.0),
+        # hyper_trans 1x1 Conv2d weight -> Linear weight, and
+        # gaussian_conditional.* -> gaussian_conditional._entropy_model.*.
+        # With config=(1, 1, 1, 1, 1, 1) each stage holds a single FAT block:
+        #   six-stage transforms (g_a/g_s): input_block=0,
+        #     stage1.blocks.0=1, stage1.tail=2, stage2.blocks.0=3,
+        #     stage2.tail=4, stage3.blocks.0=5, stage3.tail=6
+        #   hyper transforms: input_block=0, stage.blocks.0=1, stage.tail=2
+        six_stage = {
+            "input_block": 0,
+            "stage1.blocks.0": 1,
+            "stage1.tail": 2,
+            "stage2.blocks.0": 3,
+            "stage2.tail": 4,
+            "stage3.blocks.0": 5,
+            "stage3.tail": 6,
+        }
+        hyper_stage = {"input_block": 0, "stage.blocks.0": 1, "stage.tail": 2}
+        index_maps = {
+            "g_a": six_stage,
+            "g_s": six_stage,
+            "h_a": hyper_stage,
+            "h_mean_s": hyper_stage,
+            "h_scale_s": hyper_stage,
+        }
+        fat_inner_rev = {
+            "conv1": "conv1_1",
+            "conv2": "conv1_2",
+        }
+        trans_rev = {
+            "branch_attentions": "attns",
+            "frequency_modulation": "fm",
+        }
+        layer_rev = {
+            "q_proj": "q1",
+            "k_proj": "k1",
+            "v_proj": "v1",
+            "attention": "attn",
+        }
+
+        def invert_fat_inner(suffix):
+            head, _, rest = suffix.partition(".")
+            if head in fat_inner_rev:
+                new = fat_inner_rev[head]
+                return f"{new}.{rest}" if rest else new
+            if head == "frequency_attention":
+                sub_head, _, sub_rest = rest.partition(".")
+                rev = trans_rev.get(sub_head, sub_head)
+                new_rest = f"{rev}.{sub_rest}" if sub_rest else rev
+                return f"trans_block.{new_rest}"
+            return suffix
+
+        def invert_transform(prefix, idxmap, value_key):
+            rest = value_key[len(prefix) + 1 :]
+            matched = None
+            for sub in sorted(idxmap, key=len, reverse=True):
+                if rest == sub or rest.startswith(sub + "."):
+                    matched = sub
+                    break
+            assert matched is not None, (prefix, rest)
+            tail = rest[len(matched) :].lstrip(".")
+            idx = idxmap[matched]
+            if ".blocks." in matched and tail:
+                tail = invert_fat_inner(tail)
+            return f"{prefix}.{idx}.{tail}" if tail else f"{prefix}.{idx}"
+
+        upstream = {}
+        for key, value in native.items():
+            prefix = key.split(".")[0]
+            if prefix in index_maps:
+                upstream[invert_transform(prefix, index_maps[prefix], key)] = value
+            elif key.startswith("tca.tca.layers."):
+                parts = key.split(".")  # tca tca layers i name ...
+                i, name, tail = parts[3], parts[4], ".".join(parts[5:])
+                if name == "positional_encoding":
+                    new = f"tca.TCA.layers.{i}.cpe.0"
+                else:
+                    new = f"tca.TCA.layers.{i}.{layer_rev.get(name, name)}"
+                upstream[f"{new}.{tail}" if tail else new] = value
+            elif key.startswith("tca.tca."):
+                upstream[f"tca.TCA.{key[len('tca.tca.') :]}"] = value
+            elif key.startswith("tca.hyper_trans."):
+                sub = key[len("tca.hyper_trans.") :]
+                if sub == "weight":
+                    upstream["tca.hyper_trans.weight"] = value.view(
+                        value.size(0), value.size(1)
+                    )
+                else:
+                    upstream[f"tca.hyper_trans.{sub}"] = value
+            elif key.startswith("gaussian_conditional."):
+                sub = key[len("gaussian_conditional.") :]
+                upstream[f"gaussian_conditional._entropy_model.{sub}"] = value
+            else:
+                upstream[key] = value
+
+        # Upstream-only bookkeeping that the converter must drop.
+        upstream["tca.TCA.start_token"] = torch.zeros(8)
+        upstream["gaussian_conditional._entropy_model._indexes_table"] = torch.zeros(4)
+
+        assert is_upstream_layout(upstream)
+        converted = convert_fn(upstream)
+        assert "g_a.input_block.conv1.weight" in converted
+        assert "g_a.stage1.blocks.0.frequency_attention.qkv.weight" in converted
+        assert "tca.tca.layers.0.q_proj.weight" in converted
+        assert converted["tca.hyper_trans.weight"].dim() == 4
+        assert "tca.TCA.start_token" not in converted
+        assert not any(k.endswith("_indexes_table") for k in converted)
+        assert not any("_entropy_model." in k for k in converted)
+
+        loaded = FrequencyAwareTransFormer.from_state_dict(converted).eval()
+        assert loaded.M == model.M
+        assert loaded.config == model.config
+        assert loaded.num_heads == model.num_heads
+        assert loaded.tca_depth == model.tca_depth
+        assert set(loaded.state_dict().keys()) == set(native.keys())
+
+
 def test_scale_table_default():
     table = get_scale_table()
     assert SCALES_MIN == 0.11
