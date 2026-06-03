@@ -296,6 +296,49 @@ class TestWavelet:
         assert isinstance(is_pytorch_wavelets_available(), bool)
 
 
+class TestWeConv:
+    @staticmethod
+    def test_analysis_synthesis_round_trip_shapes():
+        pytest.importorskip("pytorch_wavelets")
+        from compressai.layers.wave import (
+            WeConveneAnalysisTransform,
+            WeConveneSynthesisTransform,
+        )
+
+        g_a = WeConveneAnalysisTransform(N=16, M=32).eval()
+        g_s = WeConveneSynthesisTransform(N=16, M=32).eval()
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            y = g_a(x)
+            # three stride-2 stages: 64 -> 8 spatial, M latent channels.
+            assert y.shape == (1, 32, 8, 8)
+            x_hat = g_s(y)
+        assert x_hat.shape == x.shape
+
+    @staticmethod
+    def test_wavelet_residual_blocks_state_dict_round_trip():
+        pytest.importorskip("pytorch_wavelets")
+        from compressai.layers.wave import (
+            WaveletResidualBlockUpsample,
+            WaveletResidualBlockWithStride,
+        )
+
+        down = WaveletResidualBlockWithStride(8, 16, stride=2).eval()
+        up = WaveletResidualBlockUpsample(16, 8, upsample=2).eval()
+        x = torch.rand(1, 8, 16, 16)
+        with torch.no_grad():
+            y = down(x)
+            assert y.shape == (1, 16, 8, 8)
+            z = up(y)
+            assert z.shape == (1, 8, 16, 16)
+
+        clone = WaveletResidualBlockWithStride(8, 16, stride=2)
+        missing, unexpected = clone.load_state_dict(down.state_dict(), strict=False)
+        # pytorch_wavelets re-registers DWT/IDWT kernel buffers at construction.
+        assert not unexpected
+        assert all(".dwt.transform." in k or ".idwt.inverse." in k for k in missing)
+
+
 class TestGraph:
     @staticmethod
     def _gfa(**overrides):
