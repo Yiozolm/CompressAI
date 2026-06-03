@@ -146,6 +146,3 @@ dmypy.json
 # migrate relative
 candidate/
 candidate_none/
-plan/
-AGENTS.md
-CLAUDE.md
