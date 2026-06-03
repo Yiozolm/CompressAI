@@ -97,6 +97,7 @@ __all__ = [
     "shiftlic_middle",
     "shiftlic_large",
     "weconvene",
+    "ftic",
 ]
 
 model_architectures = {
@@ -126,6 +127,7 @@ model_architectures = {
     "shiftlic-middle": _LazyImport("compressai.models.shiftlic", "ShiftLIC"),
     "shiftlic-large": _LazyImport("compressai.models.shiftlic", "ShiftLIC"),
     "weconvene": _LazyImport("compressai.models.weconvene", "WeConvene"),
+    "ftic": _LazyImport("compressai.models.ftic", "FrequencyAwareTransFormer"),
 }
 
 root_url = "https://compressai.s3.amazonaws.com/models/v1"
@@ -711,6 +713,31 @@ def weconvene(pretrained: bool = False, progress: bool = True, **kwargs):
     from compressai.models.weconvene import WeConvene
 
     return WeConvene(**kwargs)
+
+
+def ftic(pretrained: bool = False, progress: bool = True, **kwargs):
+    r"""Frequency-aware Transformer (FTIC) model from H. Li, S. Li, W. Dai,
+    C. Li, J. Zou, H. Xiong: `"Frequency-Aware Transformer for Learned Image
+    Compression" <https://openreview.net/forum?id=HKGQDDTuvZ>`_, Int. Conf. on
+    Learning Representations (ICLR), 2024.
+
+    Args:
+        pretrained (bool): If True, returns a pre-trained model. Currently
+            unavailable; raises ``RuntimeError``.
+        progress (bool): If True, displays a progress bar of the download to
+            stderr.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError(
+            "Pre-trained FTIC weights are not mirrored on S3. Download an "
+            "upstream checkpoint and load it via "
+            "`FrequencyAwareTransFormer.from_state_dict(...)` (see "
+            "examples/convert_ftic_checkpoint.py)."
+        )
+    from compressai.models.ftic import FrequencyAwareTransFormer
+
+    return FrequencyAwareTransFormer(**kwargs)
 
 
 def stf(pretrained: bool = False, progress: bool = True, **kwargs):
