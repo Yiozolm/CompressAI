@@ -88,6 +88,11 @@ attn = [
 wavelet = [
   "pytorch_wavelets",
 ]
+invcompress = [
+  # Enhanced Invertible Encoding (InvCompress) uses FrEIA's invertible
+  # coupling / 1x1-conv / squeeze layers for its INN autoencoder transform.
+  "FrEIA",
+]
 ssm = [
   # MambaIC / CMIC selective-scan acceleration. The CUDA wheel ships only for
   # Linux; elsewhere the pure-PyTorch fallback in `compressai.layers.ssm` is
@@ -137,6 +142,11 @@ exclude = ["tests"]
 # on macOS/Windows; the package itself only installs on Linux (platform marker).
 [tool.uv]
 no-build-isolation-package = ["mamba-ssm"]
+# Resolve each supported Python to the newest compatible version of a dependency
+# rather than collapsing the 3.8-3.13 range onto a single shared version. This
+# lets recent interpreters pull newer numpy / scipy wheels (e.g. scipy 1.16+ on
+# 3.11+) instead of being held back to the oldest-supported floor.
+fork-strategy = "requires-python"
 
 [[tool.uv.dependency-metadata]]
 name = "mamba-ssm"
