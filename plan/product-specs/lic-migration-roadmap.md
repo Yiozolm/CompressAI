@@ -4,9 +4,9 @@
 
 > 本路线图是候选池总盘 + 推荐顺序；逐 PR 的细节状态在 `plan/exec-plans/` 各 plan 里。已合并到上游 master 的模型：
 >
-> - **STF / WACNN**（PR #3 系），**LIC_TCM / CCA**（pr-tcm-cca），**DCAE / SAAF**（pr-dcae-saaf-auxt），**MLIC ×4**（pr-mlicpp），**GLIC**（PR #4），**MambaIC / CMIC**（PR #5），**TinyLIC / ShiftLIC small/middle/large**（PR #6，2026-06-03，merge `2f453cb`，共享 `MultistageCheckerboardLatentCodec`）。
+> - **STF / WACNN**（PR #3 系），**LIC_TCM / CCA**（pr-tcm-cca），**DCAE / SAAF**（pr-dcae-saaf-auxt），**MLIC ×4**（pr-mlicpp），**GLIC**（PR #4），**MambaIC / CMIC**（PR #5），**TinyLIC / ShiftLIC small/middle/large**（PR #6，2026-06-03，merge `2f453cb`，共享 `MultistageCheckerboardLatentCodec`），**WeConvene**（PR #7，2026-06-03，merge `0cbe7cf`，新 `WeChARMLatentCodec` + `[wavelet]`），**ICLR2024-FTIC**（PR #8，2026-06-03，merge `36b48b7`，新 `GsnConditionalLocScaleShift`），**InvCompress**（PR #9，2026-06-03，merge `43d47eb`，新 `[invcompress]`/FrEIA extra）。
 > - **不迁入**：`2024-MambaVC`（仅 arXiv 预印本，未同行评审，见 §E.14 / Phase 11）。
-> - **剩余候选**：`WeConvene`（Phase 10）、`ICLR2024-FTIC`（Phase 8）、`InvCompress`（Phase 9）；`AuxT`（共享层，已随 pr-dcae-saaf-auxt 落地）、`CCA`（已落地）。
+> - **剩余候选**：无独立 model 待迁（WeConvene/FTIC/InvCompress 已于 PR #7/#8/#9 全部迁入）；`AuxT`（共享层，已随 pr-dcae-saaf-auxt 落地）、`CCA`（已落地）为方法/插件类,不单独注册 entry。
 
 ## 本轮勘察结论
 
@@ -319,9 +319,11 @@
 - 可以直接复用 `DCAE` 迁移后沉淀的 bottleneck / attention / context 组件
 - 再叠加 frequency-related 模块
 
-### Phase 8：迁移 `FTIC`
+### Phase 8：迁移 `FTIC` ✅ 已迁入（PR #8）
 
-前置依赖：
+> **已完成 2026-06-03，PR #8，merge `36b48b7`**（详见 `plan/exec-plans/completed/ftic-integration.md`）。新移位高斯 `GsnConditionalLocScaleShift` 入 `compressai/entropy_models/`；复用 master `pad_to_window_multiple`（`swin.py`,`swin_attention.py` 未迁）；convert-to-examples + deep-import-only；T-CA 熵模型内联在 `models/ftic.py`。**未用 `range_coder`**（自带 ANS 即可）。
+
+前置依赖（历史记录）:
 
 - Phase 0.2 的 `GsnConditionalLocScaleShift` 合入 `compressai/entropy_models/`（或作为新类型）
 - `range_coder` 按严格可选处理：`forward` smoke 不需要，`compress/decompress` smoke 在缺失时跳过
@@ -332,9 +334,11 @@
 - `FrequencyAwareTransFormer` 本体进 `compressai/models/ftic.py`
 - License 缺失，合入前需要先确认
 
-### Phase 9：迁移 `InvCompress`
+### Phase 9：迁移 `InvCompress` ✅ 已迁入（PR #9）
 
-迁移要点：
+> **已完成 2026-06-03，PR #9，merge `43d47eb`**（详见 `plan/exec-plans/completed/invcompress-integration.md`）。可逆层用 `FrEIA.modules`（`GLOWCouplingBlock` / `Fixed1x1Conv` / `IRevNetDownsampling`）组装,全部内联在 `compressai/models/invcompress.py`；`InvCompress(Cheng2020Anchor)` 保留继承；新增 `[invcompress]`/FrEIA extra（CI `--all-extras` 真跑）；convert-to-examples + deep-import-only。修了 script 版 `_maybe_register_model` 配套 `TypeVar(..., bound=type[nn.Module])` 在 py3.8 import 崩的问题（改纯 `@register_model`）。
+
+迁移要点（历史记录）:
 
 - **坑**：候选目录下 `priors.py` / `waseda.py` 是旧版 `CompressionModel` / `ScaleHyperprior` / `JointAutoregressiveHierarchicalPriors` 的整体重写，**绝对不搬**。只搬 `ours.py::InvCompress` 和 `our_utils.py` 里 InvCompress 独有的部分
 - 可逆层**优先复用 `FrEIA.modules`**：`GLOWCouplingBlock` / `RNVPCouplingBlock` / `InvertibleConv1x1` / `PermuteRandom`；只有 `EnhBlock`（InvCompress 独有的 dense-conv 封装）进 `compressai/layers/lic/invertible.py`
@@ -343,7 +347,7 @@
 
 ### Phase 10：评估 `WeConvene`、`CCA`、`AuxT`
 
-- `WeConvene`：复用 Phase 0 抽出的 `compressai/layers/wave/wavelet.py`
+- `WeConvene` ✅ **已迁入（PR #7，2026-06-03，merge `0cbe7cf`）**：复用 Phase 0 抽出的 `compressai/layers/wave/`（`pytorch_wavelets`,`[wavelet]` extra）;新增 `WeChARMLatentCodec`（wavelet-domain channel-AR）入 `compressai/latent_codecs/`;详见 `plan/exec-plans/completed/weconvene-integration.md`
 - `CCA`：定位为 **loss / auxiliary entropy 方法**而非独立模型 zoo entry；落点 `compressai/losses/` 或 `compressai/entropy_models/` 的扩展，不走 `@register_model`
 - `AuxT`：定位为 **共享模块来源**；`WLS` / `iWLS` / `OLP` / `GatedTransformCNN` 已在 Phase 0 抽入 `compressai/layers/lic/`，不单独注册 model entry
 
@@ -436,7 +440,7 @@
 
 ## 当前主要风险
 
-- License 缺失：`CMIC` / `MambaIC` / `MambaVC` / `FTIC`，合入前必须确认
+- License 缺失：`CMIC` / `MambaIC` / `FTIC`（均已迁入；合入前已确认按既定政策不阻塞，`MambaVC` 已剔除）
 - **SSM 路径重叠**：`MambaIC` 和 `MambaVC` 有大量重叠的 selective-scan 核心，应合并进 `compressai/layers/ssm/ssm.py` 后再分别包 model 类，避免两套 kernel 胶水代码
 - `MambaIC` / `MambaVC` 依赖 Triton / `selective_scan_cuda*` kernel，维护成本最高
 - `CMIC` 依赖 `mamba_ssm.selective_scan_fn`，没有纯 PyTorch fallback；`basicsr` 的依赖仅是 `to_2tuple`/`trunc_normal_`，可直接替换掉，不应错误地视为核心依赖
@@ -451,6 +455,6 @@
 2. Elic 主线第一批：`GLIC`（Phase 1）→ `CMIC`（Phase 2）
 3. 老式 baseline 收敛：`MLIC++`（Phase 3，最轻）→ `WACNN`（4a）→ `SymmetricalTransFormer`（4b）→ `LIC_TCM`（Phase 5）
 4. 旧风格复杂模型：`DCAE`（Phase 6）→ `SAAF`（Phase 7）
-5. novelty 模型：`FTIC`（Phase 8，entropy 模块）→ `InvCompress`（Phase 9，可逆层）
-6. Phase 10 处理 `WeConvene`、`CCA`（→ losses/aux）、`AuxT`（→ 仅共享层）
+5. novelty 模型：`FTIC` ✅ 已迁入（PR #8，新 `GsnConditionalLocScaleShift`）→ `InvCompress` ✅ 已迁入（PR #9，FrEIA 可逆层）
+6. Phase 10：`WeConvene` ✅ 已迁入（PR #7，新 `WeChARMLatentCodec`）；`CCA`（→ losses/aux）、`AuxT`（→ 仅共享层）定位不变
 7. Phase 11：`MambaIC` ✅ 已迁入（PR #5，共享 `ssm.py`）；`MambaVC` ❌ 不迁入（仅 arXiv 预印本）

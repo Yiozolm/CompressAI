@@ -131,4 +131,4 @@ Family 2 需要 lift 到 upstream 的 shared layer 共 **3 个新子包 + 1 个�
 - 更新 `plan/README.md` 索引
 - 在 design doc `channel-slice-codec-redesign.md` §1 / §3.4 表把 GLIC/CMIC/MLIC++/MambaIC 状态从「fork `script` 已迁入」更新为「Family 2 PR 系列已合入 upstream」
 - 把 `compressai/layers/ssm/` 标记为 SSM 家族 cross-model 共享层（MambaIC 已消费；~~未来 MambaVC 复用~~ MambaVC 已决策不迁入——仅 arXiv 预印本，见 lic-migration-roadmap §E.14 / Phase 11）
-- Family 2 完成后剩余迁入对象按 lic-migration-roadmap：WeConvene (Phase 10) + FTIC (Phase 8) + InvCompress (Phase 9)；**MambaVC 已剔除**（仅 arXiv 预印本，未同行评审）
+- Family 2 完成后剩余迁入对象按 lic-migration-roadmap：WeConvene (Phase 10) ✅ PR #7 + FTIC (Phase 8) ✅ PR #8 + InvCompress (Phase 9) ✅ PR #9，**均已迁入**（2026-06-03）；**MambaVC 已剔除**（仅 arXiv 预印本，未同行评审）。独立 model 候选池已清空
