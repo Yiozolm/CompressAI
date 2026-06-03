@@ -52,6 +52,7 @@ from .image import (
     stf_wacnn,
     tcm,
     tinylic,
+    weconvene,
 )
 from .image_vbr import bmshj2018_hyperprior_vbr, mbt2018_mean_vbr, mbt2018_vbr
 from .pretrained import load_pretrained as load_state_dict
@@ -82,6 +83,7 @@ image_models = {
     "shiftlic-small": shiftlic_small,
     "shiftlic-middle": shiftlic_middle,
     "shiftlic-large": shiftlic_large,
+    "weconvene": weconvene,
     "bmshj2018-hyperprior-vbr": bmshj2018_hyperprior_vbr,
     "mbt2018-mean-vbr": mbt2018_mean_vbr,
     "mbt2018-vbr": mbt2018_vbr,

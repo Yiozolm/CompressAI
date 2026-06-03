@@ -96,6 +96,7 @@ __all__ = [
     "shiftlic_small",
     "shiftlic_middle",
     "shiftlic_large",
+    "weconvene",
 ]
 
 model_architectures = {
@@ -124,6 +125,7 @@ model_architectures = {
     "shiftlic-small": _LazyImport("compressai.models.shiftlic", "ShiftLIC"),
     "shiftlic-middle": _LazyImport("compressai.models.shiftlic", "ShiftLIC"),
     "shiftlic-large": _LazyImport("compressai.models.shiftlic", "ShiftLIC"),
+    "weconvene": _LazyImport("compressai.models.weconvene", "WeConvene"),
 }
 
 root_url = "https://compressai.s3.amazonaws.com/models/v1"
@@ -681,6 +683,34 @@ def _shiftlic_factory(variant: str):
 shiftlic_small = _shiftlic_factory("small")
 shiftlic_middle = _shiftlic_factory("middle")
 shiftlic_large = _shiftlic_factory("large")
+
+
+def weconvene(pretrained: bool = False, progress: bool = True, **kwargs):
+    r"""WeConvene model from H. Fu, J. Liang, Z. Fang, J. Han, F. Liang,
+    G. Zhang: `"WeConvene: Learned Image Compression with Wavelet-Domain
+    Convolution and Entropy Model" <https://arxiv.org/abs/2407.09983>`_,
+    European Conf. on Computer Vision (ECCV), 2024.
+
+    Requires the optional ``pytorch_wavelets`` dependency
+    (``pip install compressai[wavelet]``).
+
+    Args:
+        pretrained (bool): If True, returns a pre-trained model. Currently
+            unavailable; raises ``RuntimeError``.
+        progress (bool): If True, displays a progress bar of the download to
+            stderr.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError(
+            "Pre-trained WeConvene weights are not mirrored on S3. Download an "
+            "upstream checkpoint and load it via "
+            "`WeConvene.from_state_dict(...)` (see "
+            "examples/convert_weconvene_checkpoint.py)."
+        )
+    from compressai.models.weconvene import WeConvene
+
+    return WeConvene(**kwargs)
 
 
 def stf(pretrained: bool = False, progress: bool = True, **kwargs):

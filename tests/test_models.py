@@ -2277,6 +2277,158 @@ class TestShiftLIC:
         assert loaded_small.variant == "small"
 
 
+class TestWeConvene:
+    def _tiny_kwargs(self):
+        # g_a applies three stride-2 stages and the WeChARM DWT halves the
+        # latent once more, so a 64x64 input yields 4x4 wavelet bands. The
+        # support window must divide that, hence support_window_size=4.
+        return dict(
+            N=16,
+            M=32,
+            hyper_channels=16,
+            num_slices=4,
+            max_support_slices=2,
+            support_window_size=4,
+            support_head_dim=4,
+            support_attention_dim=16,
+        )
+
+    def test_weconvene_missing_dependency(self):
+        from compressai.layers.wave import is_pytorch_wavelets_available
+
+        if is_pytorch_wavelets_available():
+            pytest.skip("pytorch_wavelets is installed.")
+        from compressai.models.weconvene import WeConvene
+
+        with pytest.raises(ModuleNotFoundError, match="pytorch_wavelets"):
+            WeConvene(**self._tiny_kwargs())
+
+    def test_weconvene_forward_and_state_dict_round_trip(self):
+        pytest.importorskip("pytorch_wavelets")
+        from compressai.latent_codecs import WeChARMLatentCodec
+        from compressai.models.weconvene import WeConvene
+
+        model = WeConvene(**self._tiny_kwargs()).eval()
+        assert isinstance(model.latent_codec, WeChARMLatentCodec)
+
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            out = model(x)
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y_low"].shape == (1, 32, 4, 4)
+        assert out["likelihoods"]["y_high"].shape == (1, 96, 4, 4)
+        assert out["likelihoods"]["z"].shape == (1, 16, 1, 1)
+
+        sd_keys = set(model.state_dict().keys())
+        # WeConv analysis/synthesis backbone + hyper bottleneck.
+        assert "g_a.input_block.conv1.weight" in sd_keys
+        assert "h_mean_s.wavelet_block.subpel_conv.0.weight" in sd_keys
+        assert "entropy_bottleneck.quantiles" in sd_keys
+        # Containerized wavelet-domain two-branch ChARM codec.
+        assert "latent_codec.cc_mean_transforms_low.0.0.weight" in sd_keys
+        assert "latent_codec.cc_mean_transforms_high.0.0.weight" in sd_keys
+        assert "latent_codec.gaussian_conditional_low.scale_table" in sd_keys
+        assert "latent_codec.gaussian_conditional_high.scale_table" in sd_keys
+
+        loaded = WeConvene.from_state_dict(model.state_dict()).eval()
+        assert loaded.N == model.N
+        assert loaded.M == model.M
+        assert loaded.num_slices == model.num_slices
+        assert loaded.max_support_slices == model.max_support_slices
+        assert loaded.support_window_size == model.support_window_size
+        assert loaded.support_head_dim == model.support_head_dim
+        assert loaded.support_attention_dim == model.support_attention_dim
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+
+    def test_weconvene_compress_decompress_round_trip(self):
+        pytest.importorskip("pytorch_wavelets")
+        from compressai.models.weconvene import WeConvene
+
+        model = WeConvene(**self._tiny_kwargs()).eval()
+        model.update(force=True)
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            enc = model.compress(x)
+            dec = model.decompress(enc["strings"], enc["shape"])
+        assert len(enc["strings"]) == 3  # [low, high, z]
+        assert dec["x_hat"].shape == x.shape
+
+    def test_weconvene_upstream_state_dict_conversion(self):
+        pytest.importorskip("pytorch_wavelets")
+        from compressai.models.weconvene import WeConvene
+
+        spec = importlib.util.spec_from_file_location(
+            "convert_weconvene_checkpoint",
+            _EXAMPLES_DIR / "convert_weconvene_checkpoint.py",
+        )
+        convert_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(convert_module)
+        convert_fn = convert_module.convert_upstream_weconvene_state_dict
+
+        from compressai.models.weconvene import _is_pytorch_wavelets_buffer_key
+
+        # The upstream checkpoints carry the published residual-attention
+        # SwinBlock with default support dims (window=8, head=16, dim=128).
+        model = WeConvene(
+            N=16,
+            M=32,
+            hyper_channels=16,
+            num_slices=4,
+            max_support_slices=2,
+            use_residual_attention=True,
+        )
+
+        # Invert the converter's renames to synthesize an upstream-layout
+        # state_dict: nested g_a/g_s/h_* stages -> flat nn.Sequential indices,
+        # latent_codec.*_low/_high -> top-level _real/_imag, and SWAtten ->
+        # one-element Sequential (extra `.0.` segment).
+        index_inverses = {
+            "g_a.": {v: k for k, v in convert_module._GA_INDEX_MAP.items()},
+            "g_s.": {v: k for k, v in convert_module._GS_INDEX_MAP.items()},
+            "h_a.": {v: k for k, v in convert_module._HA_INDEX_MAP.items()},
+            "h_mean_s.": {v: k for k, v in convert_module._HS_INDEX_MAP.items()},
+            "h_scale_s.": {v: k for k, v in convert_module._HS_INDEX_MAP.items()},
+        }
+        codec_inverse = {v: k for k, v in convert_module._CODEC_PREFIX_RENAMES.items()}
+        atten_inverse = {v: k for k, v in convert_module._ATTEN_PREFIX_RENAMES.items()}
+
+        def to_upstream(key):
+            for dst, src in codec_inverse.items():
+                if key.startswith(dst):
+                    return src + key[len(dst) :]
+            for dst, src in atten_inverse.items():
+                if key.startswith(dst):
+                    slice_idx, _, after = key[len(dst) :].partition(".")
+                    return f"{src}{slice_idx}.0.{after}"
+            for prefix, inverse in index_inverses.items():
+                if key.startswith(prefix):
+                    rest = key[len(prefix) :]
+                    for named, idx in inverse.items():
+                        if rest == named or rest.startswith(named + "."):
+                            sub = rest[len(named) :].lstrip(".")
+                            return f"{prefix}{idx}.{sub}" if sub else f"{prefix}{idx}"
+            return key
+
+        upstream = {}
+        for key, value in model.state_dict().items():
+            if _is_pytorch_wavelets_buffer_key(key) or key.endswith(
+                "relative_position_index"
+            ):
+                continue
+            upstream[to_upstream(key)] = value
+
+        assert convert_module._is_upstream_layout(upstream)
+        converted = convert_fn(upstream)
+        assert "latent_codec.cc_mean_transforms_low.0.0.weight" in converted
+        assert not any(k.startswith("cc_mean_transforms_real.") for k in converted)
+        loaded = WeConvene.from_state_dict(converted).eval()
+        assert loaded.N == model.N
+        assert loaded.M == model.M
+        assert loaded.use_residual_attention
+
+
 def test_scale_table_default():
     table = get_scale_table()
     assert SCALES_MIN == 0.11

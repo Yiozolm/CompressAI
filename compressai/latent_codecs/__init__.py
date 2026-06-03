@@ -40,6 +40,7 @@ from .mambaic import MambaICLatentCodec
 from .multi_context_checkerboard import MultiContextCheckerboardLatentCodec
 from .multistage_checkerboard import MultistageCheckerboardLatentCodec
 from .rasterscan import RasterScanLatentCodec
+from .weconvene import WeChARMLatentCodec
 
 __all__ = [
     "LatentCodec",
@@ -57,6 +58,7 @@ __all__ = [
     "MultiContextCheckerboardLatentCodec",
     "MultistageCheckerboardLatentCodec",
     "RasterScanLatentCodec",
+    "WeChARMLatentCodec",
 ]
 
 

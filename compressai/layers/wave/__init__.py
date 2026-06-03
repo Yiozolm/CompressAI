@@ -23,6 +23,14 @@ from .wavelet import (
     IDWT_2D,
     is_pytorch_wavelets_available,
 )
+from .weconv import (
+    WaveletResidualBlockUpsample,
+    WaveletResidualBlockWithStride,
+    WeConveneAnalysisTransform,
+    WeConveneHyperAnalysisTransform,
+    WeConveneHyperSynthesisTransform,
+    WeConveneSynthesisTransform,
+)
 
 __all__ = [
     "DWT2D",
@@ -30,4 +38,10 @@ __all__ = [
     "IDWT2D",
     "IDWT_2D",
     "is_pytorch_wavelets_available",
+    "WaveletResidualBlockUpsample",
+    "WaveletResidualBlockWithStride",
+    "WeConveneAnalysisTransform",
+    "WeConveneHyperAnalysisTransform",
+    "WeConveneHyperSynthesisTransform",
+    "WeConveneSynthesisTransform",
 ]
