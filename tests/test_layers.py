@@ -371,6 +371,129 @@ class TestGraph:
         ).shape == (2, 8, 8)
 
 
+class TestSSM:
+    def test_backend_selection_pure_pytorch(self):
+        pytest.importorskip("timm")
+        from compressai.layers.ssm import (
+            get_selective_scan_backend,
+            is_mamba_ssm_available,
+            is_selective_scan_cuda_available,
+        )
+
+        # Without an accelerated backend installed the resolver must fall back
+        # to the pure-PyTorch reference implementation.
+        if not (is_mamba_ssm_available() or is_selective_scan_cuda_available()):
+            assert get_selective_scan_backend() == "torch"
+
+    def test_selective_scan_torch_matches_reference(self):
+        pytest.importorskip("timm")
+        from compressai.layers.ssm import selective_scan, selective_scan_ref
+
+        torch.manual_seed(0)
+        batch, channels, length, states = 1, 4, 8, 4
+        u = torch.randn(batch, channels, length)
+        delta = torch.rand(batch, channels, length)
+        A = -torch.rand(channels, states)
+        B = torch.randn(batch, 1, states, length)
+        C = torch.randn(batch, 1, states, length)
+        D = torch.randn(channels)
+        delta_bias = torch.randn(channels)
+
+        out = selective_scan(
+            u, delta, A, B, C, D, delta_bias=delta_bias, backend="torch"
+        )
+        ref = selective_scan_ref(u, delta, A, B, C, D, delta_bias=delta_bias)
+        assert out.shape == (batch, channels, length)
+        assert torch.allclose(out, ref)
+
+    def test_cross_scan_merge_shapes(self):
+        pytest.importorskip("timm")
+        from compressai.layers.ssm import cross_merge, cross_scan
+
+        x = torch.randn(2, 4, 6, 6)
+        scanned = cross_scan(x)  # (B, 4 directions, C, H*W)
+        assert scanned.shape == (2, 4, 4, 36)
+        merged = cross_merge(scanned.view(2, 4, 4, 6, 6))  # (B, C, H*W)
+        assert merged.shape == (2, 4, 36)
+
+    def test_ss2d_forward_shape(self):
+        pytest.importorskip("timm")
+        from compressai.layers.ssm import SS2D
+
+        ss2d = SS2D(d_model=16, d_state=4, ssm_ratio=2.0, d_conv=3).eval()
+        x = torch.rand(1, 8, 8, 16)  # SS2D operates on (B, H, W, C)
+        with torch.no_grad():
+            out = ss2d(x)
+        assert out.shape == x.shape
+
+    def test_vssblock_forward_shape_and_round_trip(self):
+        pytest.importorskip("timm")
+        from compressai.layers.ssm import VSSBlock
+
+        block = VSSBlock(hidden_dim=16, d_state=4, ssm_ratio=2.0, d_conv=3).eval()
+        block2 = VSSBlock(hidden_dim=16, d_state=4, ssm_ratio=2.0, d_conv=3).eval()
+        block2.load_state_dict(block.state_dict(), strict=True)
+        x = torch.rand(1, 16, 8, 8)  # VSSBlock operates on (B, C, H, W)
+        with torch.no_grad():
+            out = block(x)
+            out2 = block2(x)
+        assert out.shape == x.shape
+        assert torch.allclose(out, out2)
+
+    def test_build_vss_backbone_shapes(self):
+        pytest.importorskip("timm")
+        from compressai.layers.ssm import build_vss_backbone
+
+        g_a, g_s, h_a, h_mean_s, h_scale_s = build_vss_backbone(
+            depths=(1, 1, 1, 1),
+            drop_path_rate=0.0,
+            N=8,
+            M=16,
+            hyper_channels=12,
+            ssm_d_state=4,
+        )
+        x = torch.rand(1, 3, 64, 64)
+        y = g_a(x)
+        assert y.shape == (1, 16, 4, 4)  # four stride-2 stages
+        z = h_a(y)
+        assert z.shape == (1, 12, 1, 1)
+        assert h_mean_s(z).shape == (1, 16, 4, 4)
+        assert h_scale_s(z).shape == (1, 16, 4, 4)
+        assert g_s(y).shape == x.shape
+
+    def test_infer_vss_depths_and_block_kwargs(self):
+        pytest.importorskip("timm")
+        from compressai.layers.ssm import (
+            infer_vss_block_kwargs,
+            infer_vss_depths,
+        )
+        from compressai.models.mambaic import MambaIC
+
+        model = MambaIC(
+            depths=(2, 1, 3, 1),
+            N=16,
+            M=32,
+            hyper_channels=24,
+            num_slices=2,
+            max_support_slices=2,
+            context_depths=(1, 1),
+            window_size=4,
+            support_head_dim=4,
+            context_head_dim=4,
+            support_attention_dim=8,
+            context_attention_dim=8,
+            ssm_d_state=4,
+            ssm_ratio=2.0,
+            ssm_conv=3,
+        )
+        sd = model.state_dict()
+        assert infer_vss_depths(sd) == (2, 1, 3, 1)
+        kwargs = infer_vss_block_kwargs(sd)
+        assert kwargs["ssm_d_state"] == 4
+        assert kwargs["ssm_ratio"] == 2.0
+        assert kwargs["ssm_conv"] == 3
+
+
 class TestQReLU:
     @staticmethod
     def test_QReLU():

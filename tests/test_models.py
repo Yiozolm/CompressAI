@@ -28,6 +28,8 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import importlib.util
+import math
+import re
 
 from pathlib import Path
 
@@ -1786,6 +1788,342 @@ class TestCca:
         assert "mean_NAF_transforms.0.in_conv.weight" not in converted
         assert "lrp_transforms.0.0.weight" not in converted
         assert "aux_entropymodel.mean_cc_transforms.0.0.weight" not in converted
+
+
+class TestMambaIC:
+    def _tiny_kwargs(self):
+        # The VSS analysis/synthesis transforms are width-driven by N/M; keep
+        # them small and use depth-1 stages so the pure-PyTorch selective-scan
+        # fallback stays fast. g_a applies four stride-2 stages, so the smallest
+        # input whose latent still clears the window/SS2D ops is 64x64.
+        return dict(
+            depths=(1, 1, 1, 1),
+            drop_path_rate=0.0,
+            N=16,
+            M=32,
+            hyper_channels=24,
+            num_slices=2,
+            max_support_slices=2,
+            context_depths=(1, 1),
+            window_size=4,
+            support_head_dim=4,
+            context_head_dim=4,
+            support_attention_dim=8,
+            context_attention_dim=8,
+            ssm_d_state=4,
+            ssm_ratio=2.0,
+            ssm_conv=3,
+        )
+
+    def test_mambaic_forward_and_state_dict_round_trip(self):
+        pytest.importorskip("timm")
+        from compressai.models.mambaic import MambaIC
+
+        model = MambaIC(**self._tiny_kwargs()).eval()
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            out = model(x)
+        assert out["x_hat"].shape == x.shape
+        assert "y" in out["likelihoods"]
+        assert "z" in out["likelihoods"]
+
+        sd_keys = set(model.state_dict().keys())
+        # VSS backbone + entropy bottleneck on the hyper latent.
+        assert "g_a.0.weight" in sd_keys
+        assert "h_a.0.weight" in sd_keys
+        assert "entropy_bottleneck.quantiles" in sd_keys
+        # Dedicated MambaIC latent codec: per-slice SWAtten support heads,
+        # VSS spatial-context stages, masked context prediction, and a single
+        # shared GaussianConditional.
+        assert "latent_codec.mean_support_transforms.0.in_conv.weight" in sd_keys
+        assert "latent_codec.context_vss.0.0.norm.weight" in sd_keys
+        assert "latent_codec.context_prediction.0.mask" in sd_keys
+        assert "latent_codec.gaussian_conditional.scale_table" in sd_keys
+
+        loaded = MambaIC.from_state_dict(model.state_dict()).eval()
+        assert loaded.num_slices == model.num_slices
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+
+    def test_mambaic_upstream_state_dict_conversion(self):
+        pytest.importorskip("timm")
+        from compressai.models.mambaic import MambaIC
+
+        convert_upstream_mambaic_state_dict = _load_convert_fn(
+            "convert_mambaic_checkpoint.py", "convert_upstream_mambaic_state_dict"
+        )
+
+        # Build a synthetic upstream-layout state_dict by inverting the
+        # converter on a fresh MambaIC: latent-codec submodules hoisted back to
+        # the top level (with the SWAtten nn.Sequential ".0." wrapper restored),
+        # WMSA renamed to upstream embedding_layer/linear/relative_position_params
+        # (identity attn.proj dropped), Block norms/MLP renamed to ln/mlp.{0,2},
+        # plus a duplicated context_vss_{i} alias the converter must drop.
+        model = MambaIC(**self._tiny_kwargs())
+        seq_wrapped = (
+            "latent_codec.mean_support_transforms.",
+            "latent_codec.scale_support_transforms.",
+            "latent_codec.context_mean_transforms.",
+            "latent_codec.context_scale_transforms.",
+        )
+        upstream_prefix = {
+            "latent_codec.mean_support_transforms.": "atten_mean.",
+            "latent_codec.scale_support_transforms.": "atten_scale.",
+            "latent_codec.context_mean_transforms.": "anchor_atten_mean.",
+            "latent_codec.context_scale_transforms.": "anchor_atten_scale.",
+            "latent_codec.cc_mean_transforms.": "cc_mean_transforms.",
+            "latent_codec.cc_scale_transforms.": "cc_scale_transforms.",
+            "latent_codec.lrp_transforms.": "lrp_transforms.",
+            "latent_codec.context_prediction.": "context_prediction.",
+            "latent_codec.context_vss.": "context_vss.",
+            "latent_codec.gaussian_conditional.": "gaussian_conditional.",
+        }
+
+        upstream = {}
+        for key, value in model.state_dict().items():
+            # The converter synthesises identity attn.proj weights/bias; upstream
+            # has no such tensors, so drop them when inverting.
+            if ".msa.attn.proj." in key:
+                continue
+            new_key = key
+            new_value = value
+            for comp_prefix, up_prefix in upstream_prefix.items():
+                if new_key.startswith(comp_prefix):
+                    tail = new_key[len(comp_prefix) :]
+                    if comp_prefix in seq_wrapped:
+                        idx, rest = tail.split(".", 1)
+                        tail = f"{idx}.0.{rest}"
+                    new_key = up_prefix + tail
+                    break
+            # WMSA: compressai attn.qkv/output_proj/rel-pos-table -> upstream
+            # embedding_layer/linear/relative_position_params.
+            if ".msa.attn.relative_position_bias_table" in new_key:
+                new_key = new_key.replace(
+                    ".msa.attn.relative_position_bias_table",
+                    ".msa.relative_position_params",
+                )
+                ww = math.isqrt(value.size(0))
+                heads = value.size(1)
+                new_value = value.reshape(ww, ww, heads).permute(2, 0, 1).contiguous()
+            elif ".msa.attn.relative_position_index" in new_key:
+                continue  # upstream re-derives this buffer
+            elif ".msa.attn.qkv." in new_key:
+                new_key = new_key.replace(".msa.attn.qkv.", ".msa.embedding_layer.")
+            elif ".msa.output_proj." in new_key:
+                new_key = new_key.replace(".msa.output_proj.", ".msa.linear.")
+            # Block norms / MLP renamed to the upstream layout.
+            new_key = new_key.replace(".norm1.", ".ln1.")
+            new_key = new_key.replace(".norm2.", ".ln2.")
+            new_key = new_key.replace(".mlp.fc1.", ".mlp.0.")
+            new_key = new_key.replace(".mlp.fc2.", ".mlp.2.")
+            upstream[new_key] = new_value
+
+        # Duplicated context_vss_{i} alias that the converter must drop.
+        upstream["context_vss_1.0.norm.weight"] = torch.zeros(4)
+
+        converted = convert_upstream_mambaic_state_dict(upstream)
+
+        # Submodules re-rooted under latent_codec.*; duplicate alias dropped;
+        # WMSA mapped to compressai names with a synthesised identity proj.
+        assert "latent_codec.mean_support_transforms.0.in_conv.weight" in converted
+        assert not any(k.startswith("atten_mean.") for k in converted)
+        assert not any(k.startswith("context_vss_") for k in converted)
+        assert any(".msa.attn.qkv." in k for k in converted)
+        assert any(".msa.attn.proj.weight" in k for k in converted)
+        assert any(".msa.output_proj." in k for k in converted)
+
+        loaded = MambaIC.from_state_dict(converted).eval()
+        assert loaded.num_slices == model.num_slices
+
+
+class TestCMIC:
+    def _tiny_kwargs(self):
+        # CMIC stage dims drive the transform widths; depth-1 stages and a small
+        # cluster count keep the pure-PyTorch selective-scan fallback fast.
+        # g_a applies four stride-2 stages so 64x64 is the smallest safe input.
+        return dict(
+            N=24,
+            M=32,
+            groups=[8, 8, 16],
+            stage_dims=(16, 24, 32),
+            stage_depths=(1, 1),
+            num_heads=(2, 2),
+            d_state=4,
+            window_size=4,
+            inner_rank=8,
+            cluster_num=8,
+            stage_mlp_ratio=2.0,
+        )
+
+    def test_cmic_forward_and_state_dict_round_trip(self):
+        pytest.importorskip("timm")
+        pytest.importorskip("pytorch_wavelets")
+        from compressai.models.cmic import CMIC
+
+        model = CMIC(**self._tiny_kwargs()).eval()
+        x = torch.rand(1, 3, 64, 64)
+        with torch.no_grad():
+            out = model(x)
+        assert out["x_hat"].shape == x.shape
+        assert "y" in out["likelihoods"]
+        assert "z" in out["likelihoods"]
+
+        sd_keys = set(model.state_dict().keys())
+        # ELIC-family containerized hyperprior + channel-group/checkerboard.
+        assert "latent_codec.z.entropy_bottleneck.quantiles" in sd_keys
+        assert "g_a.down3.weight" in sd_keys
+        # AuxT OLP from the shared _helpers.auxt module (lowercase olp).
+        assert "g_a.AuxT_enc.0.olp.linear.weight" in sd_keys
+        assert not any(".OLP." in k for k in sd_keys)
+        # Content-aware Mamba stage with window attention + SSM content model.
+        assert (
+            "g_a.g2.blocks.0.window_attention.relative_position_bias_table" in sd_keys
+        )
+        assert "g_a.g2.blocks.0.content_model.A_logs" in sd_keys
+        # Spatial context uses the masked depthwise mixer (layer1/layer2).
+        assert (
+            "latent_codec.y.latent_codec.y0.context_prediction.layer1."
+            "mixer.masked_conv.weight" in sd_keys
+        )
+
+        loaded = CMIC.from_state_dict(model.state_dict()).eval()
+        assert loaded.groups == model.groups
+        assert loaded.stage_mlp_ratio == model.stage_mlp_ratio
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+
+    def test_cmic_aux_loss_is_scalar(self):
+        pytest.importorskip("timm")
+        pytest.importorskip("pytorch_wavelets")
+        from compressai.models.cmic import CMIC
+
+        model = CMIC(**self._tiny_kwargs())
+        aux = model.aux_loss()
+        assert isinstance(aux, torch.Tensor)
+        assert aux.dim() == 0
+        # ortho_loss is a backward-compat alias for aux_loss.
+        assert torch.equal(model.ortho_loss(), aux)
+
+    def test_cmic_upstream_state_dict_conversion(self):
+        pytest.importorskip("timm")
+        pytest.importorskip("pytorch_wavelets")
+        from compressai.models.cmic import CMIC
+
+        convert_upstream_cmic_state_dict = _load_convert_fn(
+            "convert_cmic_checkpoint.py", "convert_upstream_cmic_state_dict"
+        )
+
+        # Build a synthetic upstream-layout state_dict by inverting the
+        # converter on a fresh CMIC: lowercase olp -> OLP, CMIC-stage block
+        # naming reverted (blocks->residual_group.layers, window_attention->
+        # win_mhsa/wqkv, content_model->assm with in_proj/cpe/prompt_proj
+        # expanded, feed_forward->convffn), hyperprior nested under
+        # latent_codec.hyper.*, spatial context layer{1,2}->ly{1,2} with
+        # masked_conv->depth_conv, plus raw wavelet buffers the converter must
+        # drop.
+        model = CMIC(**self._tiny_kwargs())
+        stage_prefixes = ("g_a.g2.", "g_a.g3.", "g_s.g1.", "g_s.g2.")
+
+        upstream = {}
+        for key, value in model.state_dict().items():
+            if ".dwt.transform." in key or ".idwt.inverse." in key:
+                continue  # rebuilt at construction; upstream stored raw kernels
+            if key.endswith(".window_attention.relative_position_index"):
+                continue  # upstream re-derives this buffer
+            new_key = key
+
+            new_key = new_key.replace(".olp.", ".OLP.")
+
+            if any(p in key for p in stage_prefixes):
+                new_key = new_key.replace(".window_attention.qkv.", ".wqkv.").replace(
+                    ".window_attention.", ".win_mhsa."
+                )
+                new_key = re.sub(
+                    r"\.feed_forward(\d)\.depthwise\.",
+                    r".convffn\1.conv.",
+                    new_key,
+                )
+                new_key = re.sub(r"\.feed_forward(\d)\.", r".convffn\1.", new_key)
+                if ".content_model." in new_key:
+                    # Non-(in_proj/cpe/prompt_proj/out_*) tensors sit under
+                    # assm.selectiveScan; expand in_proj/cpe to the upstream
+                    # Sequential wrapper and rename cal_embedding.
+                    if any(
+                        seg in new_key
+                        for seg in (
+                            ".content_model.in_proj.",
+                            ".content_model.cpe.",
+                            ".content_model.prompt_proj.",
+                            ".content_model.out_proj.",
+                            ".content_model.out_norm.",
+                        )
+                    ):
+                        new_key = new_key.replace(
+                            ".content_model.in_proj.", ".assm.in_proj.0."
+                        )
+                        new_key = new_key.replace(".content_model.cpe.", ".assm.CPE.0.")
+                        new_key = new_key.replace(
+                            ".content_model.prompt_proj.", ".assm.cal_embedding."
+                        )
+                        new_key = new_key.replace(".content_model.", ".assm.")
+                    else:
+                        new_key = new_key.replace(
+                            ".content_model.", ".assm.selectiveScan."
+                        )
+                new_key = re.sub(
+                    r"\.blocks\.(\d+)\.",
+                    r".residual_group.layers.\1.",
+                    new_key,
+                )
+
+            if new_key.startswith("latent_codec.h_a."):
+                new_key = (
+                    "latent_codec.hyper.h_a." + new_key[len("latent_codec.h_a.") :]
+                )
+            elif new_key.startswith("latent_codec.h_s."):
+                new_key = (
+                    "latent_codec.hyper.h_s." + new_key[len("latent_codec.h_s.") :]
+                )
+            elif new_key.startswith("latent_codec.z.entropy_bottleneck."):
+                new_key = (
+                    "latent_codec.hyper.entropy_bottleneck."
+                    + new_key[len("latent_codec.z.entropy_bottleneck.") :]
+                )
+
+            new_key = re.sub(
+                r"context_prediction\.layer(\d)\.",
+                r"context_prediction.ly\1.",
+                new_key,
+            )
+            if "context_prediction.ly" in new_key:
+                new_key = new_key.replace("mixer.masked_conv.", "mixer.depth_conv.")
+
+            # GatedTransformCNN / aggregation blocks use upstream norm2 (CMIC
+            # stage blocks keep their norm1..norm4 and are left untouched).
+            if ".norm." in new_key and ".blocks." not in new_key:
+                new_key = new_key.replace(".norm.", ".norm2.")
+
+            upstream[new_key] = value
+
+        upstream["g_a.AuxT_enc.0.dwt.w_ll"] = torch.zeros(2, 2)
+        upstream["g_s.AuxT_dec.0.idwt.filters"] = torch.zeros(2, 2)
+
+        converted = convert_upstream_cmic_state_dict(upstream)
+
+        # Stage blocks re-rooted; hyperprior re-rooted; OLP lowercased; raw
+        # wavelet buffers dropped; spatial-context masked conv renamed.
+        assert "latent_codec.z.entropy_bottleneck.quantiles" in converted
+        assert not any(k.startswith("latent_codec.hyper.") for k in converted)
+        assert "g_a.AuxT_enc.0.olp.linear.weight" in converted
+        assert not any(".OLP." in k for k in converted)
+        assert "g_a.AuxT_enc.0.dwt.w_ll" not in converted
+        assert any(".content_model.A_logs" in k for k in converted)
+        assert any(".window_attention.qkv." in k for k in converted)
+
+        loaded = CMIC.from_state_dict(converted).eval()
+        assert loaded.groups == model.groups
 
 
 def test_scale_table_default():

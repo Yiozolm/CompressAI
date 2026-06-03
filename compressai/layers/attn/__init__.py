@@ -8,6 +8,11 @@ from .dictionary import (
     Scale,
     SpatialAttentionModule,
 )
+from .inference import (
+    infer_swatten_attention_dim,
+    infer_swatten_head_dim,
+    infer_swatten_window_size,
+)
 from .swin import (
     WMSA,
     ConvTransBlock,
@@ -43,6 +48,9 @@ __all__ = [
     "WinResidualUnit",
     "WindowAttention",
     "build_window_attention_mask",
+    "infer_swatten_attention_dim",
+    "infer_swatten_head_dim",
+    "infer_swatten_window_size",
     "pad_to_window_multiple",
     "window_partition",
     "window_reverse",
