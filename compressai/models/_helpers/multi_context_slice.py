@@ -374,4 +374,3 @@ def _select_global_inter_factory(
     if variant == "mlic":
         return None
     raise ValueError('variant must be one of "mlic", "mlic+", "mlicpp", or "mlicv2"')
-
