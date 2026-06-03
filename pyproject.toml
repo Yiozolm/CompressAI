@@ -88,6 +88,13 @@ attn = [
 wavelet = [
   "pytorch_wavelets",
 ]
+ssm = [
+  # MambaIC / CMIC selective-scan acceleration. The CUDA wheel ships only for
+  # Linux; elsewhere the pure-PyTorch fallback in `compressai.layers.ssm` is
+  # used automatically. Pinned to the version whose metadata is declared under
+  # `[[tool.uv.dependency-metadata]]` so universal resolution stays lean.
+  "mamba-ssm==2.2.2; platform_system == 'Linux'",
+]
 
 # NOTE: Temporarily duplicated from [project.optional-dependencies] until
 # pip supports installing [dependency-groups].
@@ -123,6 +130,27 @@ zip-safe = false
 
 [tool.setuptools.packages.find]
 exclude = ["tests"]
+
+# The optional `[ssm]` extra (mamba-ssm) needs `torch` at build time but does
+# not declare it, and its sdist metadata cannot be built off Linux. Provide the
+# metadata inline and disable build isolation so universal resolution succeeds
+# on macOS/Windows; the package itself only installs on Linux (platform marker).
+[tool.uv]
+no-build-isolation-package = ["mamba-ssm"]
+
+[[tool.uv.dependency-metadata]]
+name = "mamba-ssm"
+version = "2.2.2"
+requires-dist = ["torch", "triton; platform_system == 'Linux'"]
+requires-python = ">=3.8"
+
+[tool.uv.extra-build-dependencies]
+mamba-ssm = [
+  "torch",
+  "packaging",
+  "wheel",
+  "setuptools",
+]
 
 [tool.black]
 line-length = 88
