@@ -295,6 +295,82 @@ class TestWavelet:
         assert isinstance(is_pytorch_wavelets_available(), bool)
 
 
+class TestGraph:
+    @staticmethod
+    def _gfa(**overrides):
+        from compressai.layers.graph import GFA
+
+        kwargs = dict(
+            dim=64,
+            depth=2,
+            num_heads=8,
+            window_size=8,
+            sample_size=16,
+            graph_flags=True,
+            top_k=16,
+            diff_scales=1.5,
+            stages=["GN", "GS"],
+        )
+        kwargs.update(overrides)
+        return GFA(**kwargs)
+
+    def test_gfa_forward_shape(self):
+        pytest.importorskip("timm")
+        # GFA consumes a 4-D BCHW feature map plus its (H, W) size; smallest
+        # spatial size it tolerates is 16x16 (global sampling uses sample_size=16).
+        gfa = self._gfa().eval()
+        x = torch.rand(1, 64, 16, 16)
+        with torch.no_grad():
+            out = gfa(x, (16, 16))
+        assert out.shape == x.shape
+
+    def test_gfa_state_dict_round_trip(self):
+        pytest.importorskip("timm")
+        gfa = self._gfa().eval()
+        gfa2 = self._gfa().eval()
+        gfa2.load_state_dict(gfa.state_dict(), strict=True)
+        x = torch.rand(1, 64, 16, 16)
+        with torch.no_grad():
+            assert torch.allclose(gfa(x, (16, 16)), gfa2(x, (16, 16)))
+
+    def test_feature_reshape_restore_round_trip(self):
+        pytest.importorskip("timm")
+        from compressai.layers.graph import FeatureReshape, FeatureRestore
+
+        reshape = FeatureReshape(embed_dim=16)
+        restore = FeatureRestore(embed_dim=16)
+        x = torch.randn(2, 16, 8, 8)
+        embedded = reshape(x)  # BCHW -> B(HW)C
+        assert embedded.shape == (2, 64, 16)
+        restored = restore(embedded, (8, 8))  # B(HW)C -> BCHW
+        assert torch.allclose(x, restored)
+
+    def test_graph_ops_numerics(self):
+        pytest.importorskip("timm")
+        from compressai.layers.graph import (
+            compute_sobel_gradients,
+            cosine_similarity,
+            gaussian_blur,
+        )
+
+        orthogonal = cosine_similarity(
+            torch.tensor([[[[1.0, 0.0, 0.0, 0.0]]]]),
+            torch.tensor([[[[0.0, 1.0, 0.0, 0.0]]]]),
+        )
+        assert orthogonal.abs().max().item() < 1e-6
+        identical = cosine_similarity(
+            torch.tensor([[[[1.0, 0.0, 0.0, 0.0]]]]),
+            torch.tensor([[[[1.0, 0.0, 0.0, 0.0]]]]),
+        )
+        assert abs(identical.max().item() - 1.0) < 1e-6
+
+        # gaussian_blur preserves shape; sobel returns a per-pixel edge map.
+        assert gaussian_blur(torch.randn(2, 3, 16, 16)).shape == (2, 3, 16, 16)
+        assert compute_sobel_gradients(
+            torch.randn(2, 8 * 8, 16), shape=(8, 8)
+        ).shape == (2, 8, 8)
+
+
 class TestQReLU:
     @staticmethod
     def test_QReLU():

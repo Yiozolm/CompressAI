@@ -1097,6 +1097,109 @@ class TestSaaf:
         assert "gaussian_conditional.scale_table" not in converted
 
 
+class TestGlic:
+    def _tiny_kwargs(self):
+        # GLICAnalysis/Synthesis widths are hardcoded (128/192/192) and ignore
+        # N; only M / groups shrink the codec side. M=192 -> groups summing to
+        # 192. GFA needs >= 16x16 feature maps, so the smallest usable input is
+        # 128x128 (g3 runs at the 1/8 scale).
+        return dict(N=192, M=192, groups=[16, 16, 32, 64, 64])
+
+    def test_glic_forward_and_state_dict_round_trip(self):
+        pytest.importorskip("timm")
+        pytest.importorskip("pytorch_wavelets")
+        from compressai.models.glic import GLIC
+
+        model = GLIC(**self._tiny_kwargs()).eval()
+        x = torch.rand(1, 3, 128, 128)
+        with torch.no_grad():
+            out = model(x)
+        assert out["x_hat"].shape == x.shape
+        assert "y" in out["likelihoods"]
+        assert "z" in out["likelihoods"]
+
+        sd_keys = set(model.state_dict().keys())
+        # Hyperprior backbone containerized under latent_codec.* (ELIC family).
+        # GLIC's h_a starts with a plain conv(M, N), so the leading key is
+        # latent_codec.h_a.0.weight (no ResidualBottleneck .conv wrapper).
+        assert "latent_codec.h_a.0.weight" in sd_keys
+        assert "latent_codec.z.entropy_bottleneck.quantiles" in sd_keys
+        # ChannelGroups + per-group checkerboard SCCTX leaves.
+        assert "latent_codec.y.channel_context.y1.0.mixer.depth_conv.weight" in sd_keys
+        assert "latent_codec.y.latent_codec.y0.context_prediction.weight" in sd_keys
+        assert "latent_codec.y.latent_codec.y4.context_prediction.weight" in sd_keys
+        # AuxT OLP comes from the shared _helpers.auxt module (lowercase olp).
+        assert "g_a.AuxT_enc.0.olp.linear.weight" in sd_keys
+        assert not any(".OLP." in k for k in sd_keys)
+        # Graph-feature aggregation branch present.
+        assert any(k.startswith("g_a.g2.residual_group.blocks.") for k in sd_keys)
+        # No leftover upstream layout.
+        assert not any(k.startswith("latent_codec.hyper.") for k in sd_keys)
+
+        loaded = GLIC.from_state_dict(model.state_dict()).eval()
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+        assert loaded.groups == model.groups
+
+    def test_glic_aux_loss_is_scalar(self):
+        pytest.importorskip("timm")
+        pytest.importorskip("pytorch_wavelets")
+        from compressai.models.glic import GLIC
+
+        model = GLIC(**self._tiny_kwargs())
+        aux = model.aux_loss()
+        assert isinstance(aux, torch.Tensor)
+        assert aux.dim() == 0
+        # ortho_loss is a backward-compat alias for aux_loss.
+        assert torch.equal(model.ortho_loss(), aux)
+
+    def test_glic_upstream_state_dict_conversion(self):
+        pytest.importorskip("timm")
+        pytest.importorskip("pytorch_wavelets")
+        from compressai.models.glic import GLIC
+
+        convert_upstream_glic_state_dict = _load_convert_fn(
+            "convert_glic_checkpoint.py", "convert_upstream_glic_state_dict"
+        )
+
+        # Build a synthetic upstream-layout state_dict by inverting the
+        # converter on a fresh GLIC: hyper sub-codec nested under
+        # latent_codec.hyper.*, lowercase olp -> uppercase OLP, plus a couple
+        # of raw 2-D wavelet buffers that the converter must drop.
+        model = GLIC(**self._tiny_kwargs())
+        upstream = {}
+        for key, value in model.state_dict().items():
+            if ".dwt.transform." in key or ".idwt.inverse." in key:
+                continue  # rebuilt at construction; upstream stored raw kernels
+            new_key = key
+            if new_key.startswith("latent_codec.h_a.") or new_key.startswith(
+                "latent_codec.h_s."
+            ):
+                new_key = "latent_codec.hyper." + new_key[len("latent_codec.") :]
+            elif new_key.startswith("latent_codec.z.entropy_bottleneck."):
+                new_key = "latent_codec.hyper." + new_key[len("latent_codec.z.") :]
+            new_key = new_key.replace(".olp.", ".OLP.")
+            upstream[new_key] = value
+        upstream["g_a.AuxT_enc.0.dwt.w_ll"] = torch.zeros(2, 2)
+        upstream["g_s.AuxT_dec.0.idwt.filters"] = torch.zeros(2, 2)
+
+        converted = convert_upstream_glic_state_dict(upstream)
+
+        # Hyper sub-codec re-rooted; raw wavelet buffers dropped; OLP lowercased.
+        assert "latent_codec.h_a.0.weight" in converted
+        assert "latent_codec.z.entropy_bottleneck.quantiles" in converted
+        assert not any(k.startswith("latent_codec.hyper.") for k in converted)
+        assert "g_a.AuxT_enc.0.olp.linear.weight" in converted
+        assert not any(".OLP." in k for k in converted)
+        assert "g_a.AuxT_enc.0.dwt.w_ll" not in converted
+        assert "g_s.AuxT_dec.0.idwt.filters" not in converted
+
+        # The converted dict loads cleanly into a fresh GLIC.
+        loaded = GLIC.from_state_dict(converted).eval()
+        assert loaded.groups == model.groups
+
+
 class TestMlicPlusPlus:
     def test_forward_and_state_dict_round_trip(self):
         pytest.importorskip("timm")
