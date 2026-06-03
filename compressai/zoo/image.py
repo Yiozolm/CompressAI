@@ -105,6 +105,7 @@ model_architectures = {
     "dcae": _LazyImport("compressai.models.dcae", "DCAE"),
     "saaf": _LazyImport("compressai.models.saaf", "SAAF"),
     # Resolved lazily so `compressai.zoo` is importable without `timm`.
+    "glic": _LazyImport("compressai.models.glic", "GLIC"),
     "stf": _LazyImport("compressai.models.stf", "SymmetricalTransFormer"),
     "stf-wacnn": _LazyImport("compressai.models.stf", "WACNN"),
     "tcm": _LazyImport("compressai.models.tcm", "TCM"),
@@ -541,6 +542,28 @@ def saaf(pretrained: bool = False, progress: bool = True, **kwargs):
     from compressai.models.saaf import SAAF
 
     return SAAF(**kwargs)
+
+
+def glic(pretrained: bool = False, progress: bool = True, **kwargs):
+    r"""GLIC model from Y. Chen, Z. Hu, et al.: "Adaptive Learned Image
+    Compression with Graph Neural Networks", IEEE/CVF Conf. on Computer
+    Vision and Pattern Recognition (CVPR), 2026.
+
+    Requires the optional ``pytorch_wavelets`` extra (``pip install
+    compressai[wavelet]``) for the AuxT wavelet branches.
+
+    Args:
+        pretrained (bool): If True, returns a pre-trained model. Currently
+            unavailable; raises ``RuntimeError``.
+        progress (bool): If True, displays a progress bar of the download to
+            stderr.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained GLIC weights are not yet hosted on S3.")
+    from compressai.models.glic import GLIC
+
+    return GLIC(**kwargs)
 
 
 def stf(pretrained: bool = False, progress: bool = True, **kwargs):
