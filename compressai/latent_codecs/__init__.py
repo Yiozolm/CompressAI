@@ -38,6 +38,7 @@ from .hyper import HyperLatentCodec
 from .hyperprior import HyperpriorLatentCodec
 from .mambaic import MambaICLatentCodec
 from .multi_context_checkerboard import MultiContextCheckerboardLatentCodec
+from .multistage_checkerboard import MultistageCheckerboardLatentCodec
 from .rasterscan import RasterScanLatentCodec
 
 __all__ = [
@@ -54,6 +55,7 @@ __all__ = [
     "LRPGaussianLatentCodec",
     "MambaICLatentCodec",
     "MultiContextCheckerboardLatentCodec",
+    "MultistageCheckerboardLatentCodec",
     "RasterScanLatentCodec",
 ]
 
