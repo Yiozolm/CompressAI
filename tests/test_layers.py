@@ -35,6 +35,7 @@ from compressai.layers import (
     GDN1,
     AttentionBlock,
     MaskedConv2d,
+    MultistageMaskedConv2d,
     QReLU,
     ResidualBlock,
     ResidualBlockUpsample,
@@ -510,3 +511,85 @@ class TestQReLU:
 
         y_ref = x.clamp(min=0, max=2**8 - 1)
         assert torch.allclose(y_ref, y)
+
+
+class TestMultistageMaskedConv2d:
+    def test_mask_a_keeps_even_even(self):
+        conv = MultistageMaskedConv2d(2, 2, kernel_size=3, padding=1, mask_type="A")
+        mask = conv.mask[0, 0]
+        assert mask[0, 0] == 1 and mask[0, 2] == 1
+        assert mask[2, 0] == 1 and mask[2, 2] == 1
+        assert mask[0, 1] == 0 and mask[1, 0] == 0 and mask[1, 1] == 0
+
+    def test_mask_b_keeps_anti_diagonal(self):
+        conv = MultistageMaskedConv2d(2, 2, kernel_size=5, padding=2, mask_type="B")
+        mask = conv.mask[0, 0]
+        assert mask[0, 1] == 1 and mask[1, 0] == 1
+        assert mask[0, 0] == 0 and mask[1, 1] == 0
+
+    def test_mask_c_keeps_upper_half_plus_odd_rows(self):
+        conv = MultistageMaskedConv2d(2, 2, kernel_size=5, padding=2, mask_type="C")
+        mask = conv.mask[0, 0]
+        assert mask[0, 1] == 1
+        assert mask[1, 0] == 1 and mask[1, 1] == 1 and mask[1, 2] == 1
+        assert mask[0, 0] == 0 and mask[0, 2] == 0
+
+    def test_invalid_mask_type(self):
+        with pytest.raises(ValueError):
+            MultistageMaskedConv2d(2, 2, kernel_size=3, mask_type="Z")
+
+    def test_forward_shape(self):
+        conv = MultistageMaskedConv2d(2, 4, kernel_size=3, padding=1, mask_type="A")
+        x = torch.rand(1, 2, 8, 8)
+        assert conv(x).shape == (1, 4, 8, 8)
+
+
+class TestMultiplex:
+    def test_space2depth_depth2space_round_trip(self):
+        from compressai.ops import depth2space, space2depth
+
+        x = torch.randn(2, 8, 16, 16)
+        assert torch.allclose(depth2space(space2depth(x)), x)
+
+    def test_demultiplex_round_trip(self):
+        from compressai.ops import demultiplex, multiplex
+
+        x = torch.randn(2, 8, 16, 16)
+        anchor, non_anchor = demultiplex(x)
+        assert torch.allclose(multiplex(anchor, non_anchor), x)
+
+    def test_demultiplex_v2_round_trip(self):
+        from compressai.ops import demultiplex_v2, multiplex_v2
+
+        x = torch.randn(2, 8, 16, 16)
+        y1, y2, y3, y4 = demultiplex_v2(x)
+        assert torch.allclose(multiplex_v2(y1, y2, y3, y4), x)
+
+
+class TestNSA:
+    def test_resvitblock_forward_shape(self):
+        pytest.importorskip("timm")
+        from compressai.layers.attn import ResViTBlock
+
+        model = ResViTBlock(dim=16, depth=2, num_heads=2, kernel_size=3).eval()
+        x = torch.rand(1, 16, 8, 8)
+        with torch.no_grad():
+            y = model(x)
+        assert y.shape == x.shape
+
+    def test_resvitblock_state_dict_round_trip(self):
+        pytest.importorskip("timm")
+        from compressai.layers.attn import ResViTBlock
+
+        model = ResViTBlock(dim=16, depth=2, num_heads=2, kernel_size=3).eval()
+        x = torch.rand(1, 16, 8, 8)
+        with torch.no_grad():
+            y = model(x)
+        clone = ResViTBlock(dim=16, depth=2, num_heads=2, kernel_size=3).eval()
+        clone.load_state_dict(model.state_dict())
+        with torch.no_grad():
+            y2 = clone(x)
+        assert torch.allclose(y, y2)
+        keys = set(model.state_dict().keys())
+        assert "residual_group.blocks.0.attn.qkv.weight" in keys
+        assert "residual_group.blocks.0.attn.rpb" in keys

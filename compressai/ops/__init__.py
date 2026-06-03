@@ -28,6 +28,14 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from .bound_ops import LowerBound
+from .multiplex import (
+    demultiplex,
+    demultiplex_v2,
+    depth2space,
+    multiplex,
+    multiplex_v2,
+    space2depth,
+)
 from .ops import compute_padding, quantize_ste
 from .parametrizers import NonNegativeParametrizer
 from .sga import SGAQuantizer
@@ -38,4 +46,10 @@ __all__ = [
     "LowerBound",
     "NonNegativeParametrizer",
     "SGAQuantizer",
+    "space2depth",
+    "depth2space",
+    "demultiplex",
+    "multiplex",
+    "demultiplex_v2",
+    "multiplex_v2",
 ]

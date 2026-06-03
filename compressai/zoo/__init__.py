@@ -45,9 +45,13 @@ from .image import (
     mlicpp,
     mlicv2,
     saaf,
+    shiftlic_large,
+    shiftlic_middle,
+    shiftlic_small,
     stf,
     stf_wacnn,
     tcm,
+    tinylic,
 )
 from .image_vbr import bmshj2018_hyperprior_vbr, mbt2018_mean_vbr, mbt2018_vbr
 from .pretrained import load_pretrained as load_state_dict
@@ -74,6 +78,10 @@ image_models = {
     "mlicv2": mlicv2,
     "mambaic": mambaic,
     "cmic": cmic,
+    "tinylic": tinylic,
+    "shiftlic-small": shiftlic_small,
+    "shiftlic-middle": shiftlic_middle,
+    "shiftlic-large": shiftlic_large,
     "bmshj2018-hyperprior-vbr": bmshj2018_hyperprior_vbr,
     "mbt2018-mean-vbr": mbt2018_mean_vbr,
     "mbt2018-vbr": mbt2018_vbr,

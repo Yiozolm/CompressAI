@@ -92,6 +92,10 @@ __all__ = [
     "mlicplus",
     "mlicpp",
     "mlicv2",
+    "tinylic",
+    "shiftlic_small",
+    "shiftlic_middle",
+    "shiftlic_large",
 ]
 
 model_architectures = {
@@ -116,6 +120,10 @@ model_architectures = {
     "mlicv2": _LazyImport("compressai.models.mlic", "MLICv2"),
     "mambaic": _LazyImport("compressai.models.mambaic", "MambaIC"),
     "cmic": _LazyImport("compressai.models.cmic", "CMIC"),
+    "tinylic": _LazyImport("compressai.models.tinylic", "TinyLIC"),
+    "shiftlic-small": _LazyImport("compressai.models.shiftlic", "ShiftLIC"),
+    "shiftlic-middle": _LazyImport("compressai.models.shiftlic", "ShiftLIC"),
+    "shiftlic-large": _LazyImport("compressai.models.shiftlic", "ShiftLIC"),
 }
 
 root_url = "https://compressai.s3.amazonaws.com/models/v1"
@@ -614,6 +622,65 @@ def cmic(pretrained: bool = False, progress: bool = True, **kwargs):
     from compressai.models.cmic import CMIC
 
     return CMIC(**kwargs)
+
+
+def tinylic(pretrained: bool = False, progress: bool = True, **kwargs):
+    r"""TinyLIC model from M. Lu, P. Guo, H. Shi, C. Cao, Z. Ma:
+    `"High-Efficiency Lossy Image Coding Through Adaptive Neighborhood
+    Information Aggregation" <https://arxiv.org/abs/2204.11448>`_, arXiv 2022.
+
+    Uses Neighborhood Attention (NAT) transforms; the windowed attention runs
+    on a vendored pure-PyTorch kernel (no extra dependency beyond the ``timm``
+    layers pulled in by ``compressai[attn]``).
+
+    Args:
+        pretrained (bool): If True, returns a pre-trained model. Currently
+            unavailable; raises ``RuntimeError``.
+        progress (bool): If True, displays a progress bar of the download to
+            stderr.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError(
+            "Pre-trained TinyLIC weights are not mirrored on S3. Download an "
+            "upstream checkpoint and load it via "
+            "`TinyLIC.from_state_dict(...)` (see "
+            "examples/convert_tinylic_checkpoint.py)."
+        )
+    from compressai.models.tinylic import TinyLIC
+
+    return TinyLIC(**kwargs)
+
+
+def _shiftlic_factory(variant: str):
+    def _factory(pretrained: bool = False, progress: bool = True, **kwargs):
+        del progress
+        if pretrained:
+            raise RuntimeError(
+                f"Pre-trained ShiftLIC ({variant}) weights are not yet hosted " "on S3."
+            )
+        from compressai.models.shiftlic import ShiftLIC
+
+        return ShiftLIC(variant=variant, **kwargs)
+
+    _factory.__name__ = f"shiftlic_{variant}"
+    _factory.__qualname__ = f"shiftlic_{variant}"
+    _factory.__doc__ = (
+        f'ShiftLIC ({variant}) model from Y. Bao, et al.: "ShiftLIC: Lossy '
+        'Image Compression with Lightweight Channel-wise Shift", IEEE Trans. '
+        "on Circuits and Systems for Video Technology (TCSVT), 2025.\n\n"
+        "    Args:\n"
+        "        pretrained (bool): If True, returns a pre-trained model. "
+        "Currently unavailable; raises ``RuntimeError``.\n"
+        "        progress (bool): If True, displays a progress bar of the "
+        "download to stderr.\n"
+    )
+    return _factory
+
+
+shiftlic_small = _shiftlic_factory("small")
+shiftlic_middle = _shiftlic_factory("middle")
+shiftlic_large = _shiftlic_factory("large")
 
 
 def stf(pretrained: bool = False, progress: bool = True, **kwargs):

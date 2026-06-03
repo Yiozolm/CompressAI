@@ -2126,6 +2126,157 @@ class TestCMIC:
         assert loaded.groups == model.groups
 
 
+class TestTinyLIC:
+    def _tiny_kwargs(self):
+        # The NAT analysis/synthesis transforms are width-driven by N/M. The
+        # hard-coded head counts (8/12/16/20/...) require N % 8 == 0 and
+        # M % 20 == 0. g_a applies four stride-2 stages and the NAT window is
+        # 7, so the smallest input whose latent clears the window is 128x128.
+        return dict(N=16, M=40)
+
+    def test_tinylic_forward_and_state_dict_round_trip(self):
+        pytest.importorskip("timm")
+        from compressai.models.tinylic import TinyLIC
+
+        model = TinyLIC(**self._tiny_kwargs()).eval()
+        x = torch.rand(1, 3, 128, 128)
+        with torch.no_grad():
+            out = model(x)
+        assert out["x_hat"].shape == x.shape
+        assert "y" in out["likelihoods"]
+        assert "z" in out["likelihoods"]
+
+        sd_keys = set(model.state_dict().keys())
+        # NAT backbone + entropy bottleneck on the hyper latent.
+        assert "g_a0.weight" in sd_keys
+        assert "g_a1.residual_group.blocks.0.attn.qkv.weight" in sd_keys
+        assert "entropy_bottleneck.quantiles" in sd_keys
+        # Shared staged checkerboard codec: masked spatial-context convs,
+        # cross-channel transforms, and a single GaussianConditional.
+        assert "latent_codec.sc_transform_1.weight" in sd_keys
+        assert any(k.startswith("latent_codec.cc_transforms.") for k in sd_keys)
+        assert "latent_codec.gaussian_conditional.scale_table" in sd_keys
+
+        loaded = TinyLIC.from_state_dict(model.state_dict()).eval()
+        assert loaded.N == model.N
+        assert loaded.M == model.M
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+
+    def test_tinylic_compress_decompress_round_trip(self):
+        pytest.importorskip("timm")
+        from compressai.models.tinylic import TinyLIC
+
+        model = TinyLIC(**self._tiny_kwargs()).eval()
+        model.update(force=True)
+        x = torch.rand(1, 3, 128, 128)
+        with torch.no_grad():
+            enc = model.compress(x)
+            dec = model.decompress(enc["strings"], enc["shape"])
+        assert dec["x_hat"].shape == x.shape
+
+    def test_tinylic_upstream_state_dict_conversion(self):
+        pytest.importorskip("timm")
+        from compressai.models.tinylic import TinyLIC
+
+        convert_upstream_tinylic_state_dict = _load_convert_fn(
+            "convert_tinylic_checkpoint.py", "convert_upstream_tinylic_state_dict"
+        )
+
+        # Build a synthetic upstream-layout state_dict by inverting the
+        # converter: the staged codec's entropy params live at the model root
+        # (no ``latent_codec.`` prefix) and carry the ``module.`` prefix from
+        # DataParallel.
+        model = TinyLIC(**self._tiny_kwargs())
+        upstream = {}
+        for key, value in model.state_dict().items():
+            if key.startswith("latent_codec."):
+                key = key[len("latent_codec.") :]
+            upstream["module." + key] = value
+
+        converted = convert_upstream_tinylic_state_dict(upstream)
+        assert "latent_codec.sc_transform_1.weight" in converted
+        assert not any(k.startswith("module.") for k in converted)
+        loaded = TinyLIC.from_state_dict(converted).eval()
+        assert loaded.N == model.N
+        assert loaded.M == model.M
+
+
+class TestShiftLIC:
+    @pytest.mark.parametrize("variant", ["small", "middle", "large"])
+    def test_shiftlic_forward_and_state_dict_round_trip(self, variant):
+        from compressai.models.shiftlic import ShiftLIC
+
+        model = ShiftLIC(variant=variant, N=64, M=64).eval()
+        x = torch.rand(1, 3, 128, 128)
+        with torch.no_grad():
+            out = model(x)
+        assert out["x_hat"].shape == x.shape
+        assert "y" in out["likelihoods"]
+        assert "z" in out["likelihoods"]
+
+        sd_keys = set(model.state_dict().keys())
+        assert "encoder.1.weight" in sd_keys
+        assert "entropy_bottleneck.quantiles" in sd_keys
+        if variant == "large":
+            # large owns the staged checkerboard codec; no top-level GC.
+            assert any(k.startswith("latent_codec.sc_transform_") for k in sd_keys)
+            assert any(k.startswith("latent_codec.cc_transforms.") for k in sd_keys)
+            assert not any(k.startswith("gaussian_conditional.") for k in sd_keys)
+        else:
+            assert any(k.startswith("gaussian_conditional.") for k in sd_keys)
+            assert not any(k.startswith("latent_codec.") for k in sd_keys)
+
+        # from_state_dict infers the variant + N + M with no kwargs.
+        loaded = ShiftLIC.from_state_dict(model.state_dict()).eval()
+        assert loaded.variant == variant
+        assert loaded.N == model.N
+        assert loaded.M == model.M
+        with torch.no_grad():
+            out_loaded = loaded(x)
+        assert torch.allclose(out["x_hat"], out_loaded["x_hat"])
+
+    def test_shiftlic_large_compress_decompress_round_trip(self):
+        from compressai.models.shiftlic import ShiftLIC
+
+        model = ShiftLIC(variant="large", N=64, M=64).eval()
+        model.update(force=True)
+        x = torch.rand(1, 3, 128, 128)
+        with torch.no_grad():
+            enc = model.compress(x)
+            dec = model.decompress(enc["strings"], enc["shape"])
+        assert dec["x_hat"].shape == x.shape
+
+    def test_shiftlic_upstream_state_dict_conversion(self):
+        from compressai.models.shiftlic import ShiftLIC
+
+        convert_upstream_shiftlic_state_dict = _load_convert_fn(
+            "convert_shiftlic_checkpoint.py", "convert_upstream_shiftlic_state_dict"
+        )
+
+        # large: codec entropy params hoisted to the root + module. prefix.
+        model = ShiftLIC(variant="large", N=64, M=64)
+        upstream = {}
+        for key, value in model.state_dict().items():
+            if key.startswith("latent_codec."):
+                key = key[len("latent_codec.") :]
+            upstream["module." + key] = value
+        converted = convert_upstream_shiftlic_state_dict(upstream)
+        assert any(k.startswith("latent_codec.sc_transform_") for k in converted)
+        loaded = ShiftLIC.from_state_dict(converted).eval()
+        assert loaded.variant == "large"
+
+        # small: no codec; conversion only strips the module. prefix.
+        small = ShiftLIC(variant="small", N=64, M=64)
+        up_small = {"module." + k: v for k, v in small.state_dict().items()}
+        conv_small = convert_upstream_shiftlic_state_dict(up_small)
+        assert not any(k.startswith("module.") for k in conv_small)
+        assert not any(k.startswith("latent_codec.") for k in conv_small)
+        loaded_small = ShiftLIC.from_state_dict(conv_small).eval()
+        assert loaded_small.variant == "small"
+
+
 def test_scale_table_default():
     table = get_scale_table()
     assert SCALES_MIN == 0.11
