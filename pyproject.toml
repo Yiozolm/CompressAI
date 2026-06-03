@@ -31,7 +31,12 @@ classifiers = [
 dependencies = [
   "einops",
   "matplotlib",
-  "numpy >= 1.24.4",
+  # torch only gains numpy-2.0 support in 2.3.0; this project resolves torch
+  # to 2.2.2 on Python < 3.12 (torch >= 2.6 is pinned only on 3.12+), so cap
+  # numpy < 2 there. On 3.12+ the newer torch allows numpy 2.x. scipy still
+  # floats up under both caps (scipy 1.17 accepts numpy >= 1.26.4, < 2.7).
+  "numpy >= 1.24.4, < 2; python_version < '3.12'",
+  "numpy >= 1.24.4; python_version >= '3.12'",
   "Pandas >= 2.0.3; python_version < '3.9'",
   "Pandas >= 2.3.2; python_version >= '3.9'",
   "pybind11>=2.6.0; python_version < '3.10'", # For --no-build-isolation.
