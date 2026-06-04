@@ -712,9 +712,9 @@ Phase 14 完成后，4 个 MLIC family 共用 `_BaseMLIC` 模板：MLIC / MLIC+ 
 - 移动本文件到 `plan/exec-plans/completed/`
 - 更新 `plan/README.md` 索引
 - 在 design doc `channel-slice-codec-redesign.md`：
-  - §3.4 表把 MLIC++ 的 codec 列从 `MLICPlusPlusLatentCodec` 改为 `ChannelGroupsLatentCodec + MultiContextCheckerboardLatentCodec(× K slices)`
-  - §10.12 dead-end 段把 「MLIC++ 内部不容器化」结论修订为「MLIC++ 内部部分容器化：双 head + 多 context + 双 LRP 抽成 sibling leaf `MultiContextCheckerboardLatentCodec`，外层用 upstream `ChannelGroupsLatentCodec`」
-  - 加新条目：`MultiContextCheckerboardLatentCodec` 在 §3.4 codec 类完整分类表占一行（family 2 / leaf / 用户 = MLIC++ + MambaIC 候选）
+  - §3.4 表把 MLIC++ 的 codec 列从 `MLICPlusPlusLatentCodec` 改为 `ChannelGroupsLatentCodec + MultiContextCheckerboardLatentCodec(× K slices)`（**已在 2026-06-04 重构落地**）
+  - 加新条目：`MultiContextCheckerboardLatentCodec` 在 §3.4 codec 类完整分类表占一行（family 2 / leaf / 用户 = MLIC++）（**已落地**）
+  - dead-end 结论「MLIC++ 内部不容器化」的修订（改为「部分容器化：双 head + 多 context + 双 LRP 抽成 sibling leaf」）现记录在 [`codec-containerization-h-g-refactor.md`](../completed/codec-containerization-h-g-refactor.md#design-rationale)「设计依据」段 D.8（原 design-doc §10.12 已并入该处）
 - 在 [`family2-roadmap.md`](family2-roadmap.md) §1 / §3 / §4 表更新 MLIC++ 相关行
 - **MambaIC PR (PR-3) 启动时**重新评估：是否把 `MambaICLatentCodec` 也改写为 `MultiContextCheckerboardLatentCodec` 的应用层装配（spatial_context_nonanchor=VSSBlock）；如可，PR-3 LoC 会进一步压缩
 - **新增 follow-up exec plan `plan/exec-plans/active/residual-block-act-norm-refactor.md`**（独立 PR，不绑定本 PR）：把 `compressai.layers.layers.ResidualBlock*` + `compressai.models.sensetime.ResidualBottleneckBlock` 加 `act=` (and optionally `norm=`) kwargs，删除 `compressai/layers/lic/mlic/transforms.py` 私有 `_ResidualBlock*`，避免每个论文 fork 一份私有 GELU/SiLU/LayerNorm 变体。先收集 DCAE / SAAF / 其他 follow-up 模型的实际需求再做设计决策。详细动机见 §Phase 2 实施差异第 2 节

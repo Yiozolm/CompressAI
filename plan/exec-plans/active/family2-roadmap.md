@@ -2,7 +2,7 @@
 
 **计划日期**：2026-05-10（v2，2026-05-11 把 MLIC + MLIC+ + MLICv2 合并进 PR-1 同一 PR）
 **状态**：active（PR-1 MLIC 系列：MLIC++ Phase 1-4 + Phase 11.5 unify 已落地；v1/v1+ Phase 10-11 已落地；v2 Phase 12 leaf hook + Phase 13 layers + Phase 14 model/factory/zoo 已落地，Phase 5/15/16 待动手；**PR-2 GLIC ✅ PR #4；PR-3 MambaIC + PR-4 CMIC ✅ 合并为 PR #5（2026-06-03）**；仅剩 PR-1 收尾）
-**设计文档**：[`plan/design-docs/channel-slice-codec-redesign.md`](../../design-docs/channel-slice-codec-redesign.md) — §2.2 Family 2 表 + §3.1 Family 2 段 + §10.5 wiring sketch（Family 1 已实施完毕，Family 2 复用相同思路但**不重新容器化** dedicated codec）
+**设计文档**：[`plan/design-docs/channel-slice-codec-redesign.md`](../../design-docs/channel-slice-codec-redesign.md) — §2.2 Family 2 表 + §3.1 Family 2 段 + §4 容器化适用边界；H+G wiring sketch / state_dict 设计见 [`codec-containerization-h-g-refactor.md`](../completed/codec-containerization-h-g-refactor.md#design-rationale)「设计依据」段（Family 1 已实施完毕，Family 2 复用相同思路但**不重新容器化** dedicated codec）
 
 > **本文档定位**：Family 2 整体迁入的 master roadmap + scope 拆分 + 依赖图 + shared layer lift 矩阵 + PR 顺序。每个 PR 的 phase 级细节在各自 exec plan 文件里展开（链接见 §6）。
 

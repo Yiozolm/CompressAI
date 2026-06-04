@@ -33,7 +33,7 @@
 
 - [layers-abstraction-refactor.md](design-docs/layers-abstraction-refactor.md) — `compressai/layers/` 分层评估、按算子族重组的原则与执行记录
 - [cca-cross-model-extension.md](design-docs/cca-cross-model-extension.md) — 把 CCA 辅助熵模型从 TCM 单点接入推广到所有 channel-slice LIC 模型的方向性备忘
-- [channel-slice-codec-redesign.md](design-docs/channel-slice-codec-redesign.md) — 跨 13 个 entropy head（覆盖 fork `script` 全部 17 个 codec 类、7 个 family）的 latent codec 抽象层调研：本 `pr-tcm-cca` 实施 Direction H + G 联合 refactor（容器化 + hyperprior 进 codec，沿 ELIC pattern；净 -580 行）。备选 C+A 方案保留为决策记录
+- [channel-slice-codec-redesign.md](design-docs/channel-slice-codec-redesign.md) — **codec 家族分类速查表**：跨 25 个 entropy head（9 个结构族 + baseline/wrapper 桶）的变异维度对比与结构分类，含容器化适用边界。2026-06-04 补充调研新增 Family 8（空间 raster-scan AR）/ Family 9（非高斯 VQ）。H+G 容器化重构的候选方向、推荐方案与详细 API/state_dict 设计已并入 [`codec-containerization-h-g-refactor.md`](exec-plans/completed/codec-containerization-h-g-refactor.md)「设计依据」段
 - [mlic-family-reproduction.md](design-docs/mlic-family-reproduction.md) — MLIC v1 / MLIC+ / MLICv2 在 PR-1 落地的 `MultiContextCheckerboardLatentCodec` 抽象上的复现设计（v1/v1+ Phase 10-11 已落地；Phase 11.5 已把 MLIC++ 统一到 `_BaseMLIC` 模板并删除 `mlicpp.py`；Phase 12 已给 leaf 加 `selective_predictor` 可选 hook；Phase 13 已新增 MLICv2 layers 子包；Phase 14 已接入 MLICv2 model/factory/zoo；Phase 5 统一 convert script + MLIC++ 真实 ckpt smoke 已落地；SGA Layer A codec generalization 已完成并归档）；记录 v1/v1+/v2 合并进 PR-1 的 scope 与 family2-roadmap 接入；**2026-05-11 v3.1 修订**新增 Phase 11.5 + Phase 5 ckpt smoke 重排到 Phase 14 之后
 
 ### exec-plans/active/

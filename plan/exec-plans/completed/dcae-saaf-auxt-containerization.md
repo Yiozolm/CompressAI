@@ -4,7 +4,7 @@
 **分支**：`pr-dcae-saaf-auxt`（基于 `upstream/master` 在 pr-tcm-cca merge 后；开发期间临时基于 `pr-tcm-cca`）
 **目标 PR**：本仓向上游 `InterDigitalInc/CompressAI` 提交的 `#353` 系列下一个 PR（pr-tcm-cca 之后的第三个 PR）
 **前置依赖**：[`pr-tcm-cca`](../completed/codec-containerization-h-g-refactor.md) 必须先 merge 进 upstream（提供 `HyperpriorLatentCodec` + `ChannelGroupsLatentCodec` 容器化基础设施 + `_helpers/channel_context` + `_helpers/channel_slice` + `LRPGaussianLatentCodec` + `_slice_helpers`）
-**设计文档**：[`plan/design-docs/channel-slice-codec-redesign.md`](../../design-docs/channel-slice-codec-redesign.md) — §2.1 Family 1 表已含 DCAE/SAAF 列；§10.5 wiring sketch 已为 DCAE/SAAF 留占位
+**设计文档**：[`plan/design-docs/channel-slice-codec-redesign.md`](../../design-docs/channel-slice-codec-redesign.md) §2.1 Family 1 表已含 DCAE/SAAF 列；容器化 wiring sketch / state_dict 路径设计见 [`codec-containerization-h-g-refactor.md`](codec-containerization-h-g-refactor.md#design-rationale)「设计依据」段（D.2/D.4/D.5，已为 DCAE/SAAF 双 h_s + dictionary head 留模式）
 
 > **执行顺序**：本计划期望 pr-tcm-cca PR 已 merge 进 upstream（commit hash 会变），所以最终 base 是 upstream/master post-merge。开发期间可临时基于 `pr-tcm-cca` 分支，等 upstream merge 后做一次 `git rebase --onto upstream/master <old-base>`（参考 pr-tcm-cca 的 Phase 8.3 决策记录）。
 >

@@ -6,7 +6,7 @@
 **目标 PR**：本仓向上游 `InterDigitalInc/CompressAI` 提交的下一个 PR
 **最终 commits**：`c6d556a..f87c8c8`（6 commits，rebase 后 hash），已 push 到 `origin/pr-tcm-cca`
 **PR draft**：[`plan/generated/pr-tcm-cca-draft.md`](../../generated/pr-tcm-cca-draft.md)
-**设计文档**：[`plan/design-docs/channel-slice-codec-redesign.md`](../../design-docs/channel-slice-codec-redesign.md) — 完整架构、API、风险评估、§10 详细设计是本计划的实施参考
+**设计文档**：[`plan/design-docs/channel-slice-codec-redesign.md`](../../design-docs/channel-slice-codec-redesign.md) §1–§3 是 codec 家族分类速查表（变异维度 + 七族叙事）。**候选方向对比、推荐方案与详细 API/state_dict 设计**（原 design-doc §4–§10）已于 2026-06-04 重构并入本计划末尾「[设计依据](#design-rationale)」段。
 
 > **执行顺序调整（2026-05-09，Phase 1 完成后）**：原 Phase 2「删除 `ChannelSliceLatentCodec`」会提前破坏 STF/WACNN（因为 `_bases/slice_entropy.py` 还在 import 它），跟 Phase 2 自身的「不引入新失败」验收冲突。决定：**Phase 2 推迟到 STF/TCM/CCA 全部迁移完成之后**，与 Phase 6 删除 `_bases/slice_entropy.py` 合并执行。Phase 文档编号保持稳定；实际执行顺序为 **Phase 1 → 3 → 4 → 5 → 2+6 → 7 → 8**。详见 Phase 2 / Phase 6 头部 cross-reference。
 >
@@ -462,9 +462,138 @@
 
 ---
 
-## 完成后
+<a id="design-rationale"></a>
+## 设计依据（原 design-doc §4–§10，2026-06-04 并入）
+
+> 本段是 H+G 重构的**决策与详细设计记录**，2026-06-04 从 `channel-slice-codec-redesign.md` §4–§10 精简后并入（design-doc 收敛为 §1–§3 codec 家族速查表）。codec 家族变异维度 + 七族分类仍在 design-doc §1–§3。
+
+### D.1 候选方向对比（A–H）
+
+| 方向 | 思路 | 结论 |
+|---|---|---|
+| A | 给 `ChannelSliceLatentCodec` 加 4 个可选参数（`slice_sizes`/`lrp_transforms`/`support_filter`/`lrp_scale`）| 覆盖 Family 1 全部需求，但不解决「单体类 + 多 ModuleList 同位」的 mental model |
+| B | 把「算 (μ,σ)」「应用 LRP」抽成 Strategy 对象 | **否决**：每个 strategy 又是 `nn.Module`，state_dict 多一层、净增复杂度，不减循环重复 |
+| C | 多姐妹 codec 类，文档说清对应家族 | fork `script` 现状；Family 1 仍要做 A 才解决 |
+| D | 只改基类（widths/factory/use_lrp/slice_sizes），不动 codec | codec 没加 `slice_sizes` 则 CCA-main 仍用不了 |
+| E | `ChannelSliceLatentCodec` 加 `support_builder` callable 接 DCAE dictionary | 净删 ~330 LoC，但引入比 `support_filter` 更宽的 callable hook，越「避免 swiss army knife」红线 |
+| F | Family 2 三家（ELIC/MLIC++/MambaIC）合一 + `intra_slice_context_factory` | **不动**：联合-vs-分离 mean/scale 让 state_dict 不兼容；dedicated 类只有 2 个（MLIC++/MambaIC），ELIC/GLIC/CMIC 共用 upstream，未达 dedupe 阈值 |
+| **G** ⭐ | **`HyperpriorLatentCodec` 嵌套**：`h_a`/`h_s`/`entropy_bottleneck` 收进 codec，模型只剩 g_a+g_s+latent_codec（沿 ELIC pattern）| **采纳（与 H 联合）**：codec-owned hyperprior；代价是 state_dict key 路径全变 + 扩展双 h_s |
+| **H** ⭐ | **容器化重写 `ChannelSliceLatentCodec`**：单体 → ELIC 风格容器（`channel_context` + `latent_codec` 字典），forward 只 dispatch | **采纳**：模型→容器→leaf 三层，state_dict 路径自解释、与 ELIC pattern 收敛；代价是 5 个 Family 1 模型 ckpt 路径全变、删 `_bases/{slice_entropy,dictionary_entropy}.py` |
+
+**曾考虑 C+A（短期小改）后 pivot 到 H+G 直接实施**，理由 3 条：(a) C+A 净 −125 行、H+G 净 −580 行且 state_dict 自解释 + `_bases/` 整目录可删；(b) C+A 后 pedagogical clarity 无改善（仍是单体 + 多 ModuleList）；(c) maintainer 已承诺接受重构，C+A 是浪费的中间步——做完还要再做 H+G，等于两次 state_dict rename。
+
+### D.2 推荐方案 H+G 概览
+
+模型类只剩 `g_a + g_s + latent_codec`，latent_codec 沿 ELIC pattern 完全容器化——直接用 upstream `HyperpriorLatentCodec` + `ChannelGroupsLatentCodec` 嵌套，每片一个独立 context module 和 leaf codec，state_dict 路径直接反映模型层级。
+
+```python
+class WACNN(SimpleVAECompressionModel):          # 基类只剩通用 forward/compress/decompress
+    def __init__(self, N=192, M=320, num_slices=10, max_support_slices=5):
+        super().__init__()
+        self.g_a = ...
+        self.g_s = ...
+        self.latent_codec = HyperpriorLatentCodec(           # ← upstream 已有
+            h_a=_h_a(M, N),
+            h_s=DualHyperSynthesis(_h_mean_s(M, N), _h_scale_s(M, N)),  # ← 新增 ~25 行 adapter
+            latent_codec={
+                "z": EntropyBottleneckLatentCodec(EntropyBottleneck(N), quantizer="noise"),
+                "y": ChannelGroupsLatentCodec(                # ← upstream 已有，只加 2 个可选参数
+                    groups=[M // num_slices] * num_slices,    # 等大切片 = list of K equal sizes
+                    max_support_slices=max_support_slices,    # NEW (default -1)
+                    channel_context={f"y{k}": _build_mean_scale_head(...) for k in range(num_slices)},
+                    latent_codec={f"y{k}": LRPGaussianLatentCodec(...) for k in range(num_slices)},  # ← 新增 ~30 行 subclass
+                ),
+            },
+        )
+```
+
+**二次审查 upstream codec 后的复用决策**（避免重复造轮子）：删除 `ChannelSliceLatentCodec`（与 upstream `ChannelGroupsLatentCodec` 接口完全一致）；`LRPGaussianLatentCodec` 作为 subclass 追加到 upstream `gaussian_conditional.py` 末尾（~30 行）；CCA z STE 直接用 upstream `EntropyBottleneckLatentCodec(quantizer="ste")`（零改动）；`ChannelGroupsLatentCodec` 加 `max_support_slices` + `support_filter` 两个向后兼容可选参数（~10 行 diff）。
+
+### D.3 容器与 leaf（§10.1–§10.2）
+
+**容器**：复用 upstream `ChannelGroupsLatentCodec`（不新建）——`groups: List[int]` 同时涵盖等大 `[M//K]*K` 与变长 `[s0..sN]`；新增可选 `max_support_slices: int = -1`（STF/TCM clamp 用，默认 use-all-prior 不影响 ELIC）+ `support_filter: Optional[Callable]`（CCA-aux skip-most-recent 用）。
+
+**leaf 清单**：
+
+| Class | 来源 | 用户 |
+|---|---|---|
+| `GaussianConditionalLatentCodec` | upstream 已有 | F2 leaf（ELIC checkerboard 内嵌）|
+| **`LRPGaussianLatentCodec`** | 追加在 upstream `gaussian_conditional.py` 末尾（subclass，~30 行；override forward 加 `0.5*tanh` LRP 后处理）| F1 全部 K slice（STF/WACNN/TCM/CCA-main/CCA-aux）|
+| `CheckerboardLatentCodec` | upstream 已有 | F2（ELIC 内嵌）|
+| `EntropyBottleneckLatentCodec(quantizer="ste"\|"noise")` | upstream 已有 | z 编码（CCA 用 ste，其他用 noise）|
+
+LRP 单独 leaf 而非 `GaussianConditionalLatentCodec` 的可选参数：不扩展 upstream leaf 接口（ELIC 等零风险）；leaf 类型自我说明（`latent_codec.y3.lrp_transform.*` 一眼看出哪些 slice 有 LRP）；subclass ~30 行复用基类 `_chunk`/quantizer/compress/decompress。
+
+### D.4 应用层 channel_context + hyperprior 适配（§10.3、§10.6）
+
+mean/scale 分离的 head（STF/TCM/CCA）用普通 `nn.Module` 工厂（`build_mean_scale_head`）构造，放 `compressai/models/_helpers/`——沿 ELIC「`channel_context` 字典里放普通 module」约定，**不进** `latent_codecs/`。head 满足 `forward(prior_y_hat_concat) -> ch_ctx_params`。DCAE dictionary cross-attention 同为应用层 helper（DCAE/SAAF 上岸时加）。
+
+**`DualHyperSynthesis` adapter**（`_hyper_synthesis.py`，~25 行）——双 h_s 模型用，零改动 upstream `HyperpriorLatentCodec`：
+
+```python
+class DualHyperSynthesis(nn.Module):
+    """Concatenate outputs of two parallel h_s heads along channel dim.
+    Used by Family 1 models (STF/TCM/CCA/DCAE/MambaVC) with separate h_mean_s/h_scale_s."""
+    def __init__(self, h_mean_s, h_scale_s):
+        super().__init__()
+        self.h_mean_s, self.h_scale_s = h_mean_s, h_scale_s
+    def forward(self, z_hat):
+        return torch.cat([self.h_mean_s(z_hat), self.h_scale_s(z_hat)], dim=1)
+```
+
+单 h_s 模型（ELIC/MLIC++）直接 `h_s=h_s`，不用 wrapper。CCA z STE 用 `EntropyBottleneckLatentCodec(quantizer="ste")`（upstream 已支持，原担心的 `HyperLatentCodec.quantizer` 扩展不需要）。
+
+### D.5 State_dict 路径设计（§10.7，STF 为例 —— 最高价值，逐字保留）
+
+> `HyperpriorLatentCodec.__init__` 把 `self.latent_codec = {...}` 设为普通 dict（非 nn.ModuleDict），子模块经 `self.y`/`self.z` 注册——所以外层是单层 `latent_codec.y.*`/`latent_codec.z.*`；`ChannelGroupsLatentCodec` 内部才是真 nn.ModuleDict，故 leaf 是 `latent_codec.y.latent_codec.y{k}.*`。
+
+| 旧（`pr-tcm-cca` 迁移前）| 新（H + G 后，commit `8b3ea4d` 验证）|
+|---|---|
+| `entropy_bottleneck.quantiles` | `latent_codec.z.entropy_bottleneck.quantiles` |
+| `h_a.0.weight` | `latent_codec.h_a.0.weight` |
+| `h_mean_s.0.weight` | `latent_codec.h_s.h_mean_s.0.weight` |
+| `h_scale_s.0.weight` | `latent_codec.h_s.h_scale_s.0.weight` |
+| `latent_codec.cc_mean_transforms.{k}.0.weight` | `latent_codec.y.channel_context.y{k}.mean_cc.0.weight` |
+| `latent_codec.cc_scale_transforms.{k}.0.weight` | `latent_codec.y.channel_context.y{k}.scale_cc.0.weight` |
+| `latent_codec.lrp_transforms.{k}.0.weight` | `latent_codec.y.latent_codec.y{k}.lrp_transform.0.weight` |
+| `latent_codec.gaussian_conditional._scale_table` | `latent_codec.y.latent_codec.y{k}.gaussian_conditional._scale_table`（per-slice 副本，K 份）|
+
+**`side_in_context=True` 额外约束**：channel_context 字典覆盖 `y0..yK-1`（不是 ELIC 默认 `y1..yK-1`），所以 `latent_codec.y.channel_context.y0.{mean,scale}_cc.*` 在 STF/WACNN/TCM/CCA 的 state_dict 中存在；`infer_num_slices` 自动检测 y0 是否存在并据此 ±1。
+
+**WMSA wrapper 路径**：`compressai.layers.attn.swin.WMSA` 把 WindowAttention 注册为 `self.attn`，故 conv_b 内 attention 路径是 `*.conv_b.<i>.attn.attn.{qkv,proj,relative_position_*}`（双层 attn）；上游 Zou et al. ckpt 是单层——`convert_upstream_stf_state_dict` 经 `_nest_winmsa_keys` 正则自动 nesting。
+
+**LRP byte-for-byte 兼容**：`MeanScaleContextHead(emit_mean_support=True)` + `LRPGaussianLatentCodec(mean_support_trail_channels=M+slice_ch*support_count)` 使新 LRP transform 第一 conv 输入宽度跟旧 `M + slice_ch*(support_count+1)` 完全一致——上游 `lrp_transforms.{k}.*` 权重直接转移，无需 fine-tune。
+
+**GaussianConditional 共享问题**：原 1 个共享 → 现 K 个 per-slice 副本（`_scale_table`/`_offset`/`_cdf_length` 重复 K 份，每模型多 ~几十 KB）。PyTorch state_dict 不 dedupe by-id，实用上可接受。
+
+### D.6 基类去留 + convert 脚本影响（§10.8–§10.9）
+
+**删除**：`SliceEntropyCompressionModel`（职责转移到 `HyperpriorLatentCodec` + 扩展后 `ChannelGroupsLatentCodec` + leaves；Family 1 模型直接继承 upstream `SimpleVAECompressionModel`）、`ChannelSliceLatentCodec`（重复 upstream）。**helper 保留**（`infer_num_slices`/`infer_max_support_slices`/`slice_support_channels`/`lrp_support_channels`/`make_entropy_transform`）搬到 `compressai/latent_codecs/_slice_helpers.py`。`DictionaryEntropyCompressionModel` 本 PR 不动（DCAE/SAAF follow-up 再删）。
+
+每个 `convert_*_checkpoint.py` 加 `_DIRECTION_GH_RENAMES`（hyperprior 进 codec + per-slice 循环生成 cc/lrp/gaussian rename）：STF/TCM 各 ~25 行、CCA ~30（aux 多一层）、DCAE ~30（dt/dt_cross_attention 移位）、MambaVC ~25、MLIC++ ~5、MambaIC ~10。
+
+### D.7 与 upstream codec 的复用关系（PR description 用，§10.11）
+
+| upstream codec | 本 PR 怎么用 |
+|---|---|
+| `LatentCodec`（base.py）| 父类，所有 leaf/容器继承 |
+| `HyperpriorLatentCodec` | **核心容器**：模型 wiring 顶层 |
+| `EntropyBottleneckLatentCodec` | z leaf；CCA 用 `quantizer="ste"`，其他默认 `"noise"` |
+| `GaussianConditionalLatentCodec` | Family 1 leaf 基类（`LRPGaussianLatentCodec` subclass 用于全部 K slice）|
+| `ChannelGroupsLatentCodec` | **核心容器**：复用 + 加 `max_support_slices` + `support_filter` 两个可选参数 |
+| `CheckerboardLatentCodec` / `HyperLatentCodec` / `RasterScanLatentCodec` / `gain/*` | 不用（其他 family 用 / upstream 已 deprecated）|
+
+### D.8 LoC 与已 drop 的设计
+
+- **LoC**：fork-baseline 假设下估算净 ~−520 行（删 `channel_slice.py` −270 + `_bases/slice_entropy.py` −260 + 3 个 F1 模型瘦身 −330，抵消新增基础设施 + convert rename + 测试）；**实际 upstream-baseline PR diff +4596/−655 = 净 +3941**——因 TCM/CCA 在 upstream 不存在须从零写入容器化版本（TCM ~700 + CCA ~1100 + CCA loss ~130 + 2 convert ~250 + 测试 ~500）。详见 [`plan/generated/pr-tcm-cca-draft.md`](../../generated/pr-tcm-cca-draft.md)。
+- **已 drop 的 `build_channel_slice_codec`**（原 §10.4 应用层 factory）：设计过，实施时判定 unused 而删除（commit `978d840` "drop unused build_channel_slice_codec"）——模型侧直接构造 `ChannelGroupsLatentCodec` 字典更直观。
+- **dead-end 评估**：HPCM/WeConvene/TinyLIC/ShiftLIC/Entroformer/RefBasedAR 不容器化（forward loop 不可分解）；MLIC++ 内部不容器化的原结论**已被 [`family2-roadmap.md`](../active/family2-roadmap.md) PR-1 推翻**——拆出 sibling leaf `MultiContextCheckerboardLatentCodec`（`multi_context_checkerboard.py` 311 行 + `_checkerboard_helpers.py` 145 行已落地，含 ELIC 等价回归测试）。
+
+---
+
+
 
 - [x] 移动本文件到 `plan/exec-plans/completed/` ✅
 - [x] 更新 `plan/README.md` 索引 ✅（active section 移除，completed section 加 entry 含 commit range）
-- [x] 在 design doc `channel-slice-codec-redesign.md` §5 顶部加「**实施完成**」标记 ✅（含 commit range + 链回本 exec plan）
+- [x] ~~在 design doc `channel-slice-codec-redesign.md` §5 顶部加「**实施完成**」标记~~ —— **已被 2026-06-04 重构取代**：design-doc §4–§10（含原 §5 推荐方案）整体精简后并入本计划「[设计依据](#design-rationale)」段，design-doc 收敛为 §1–§3 纯参考表
 - [ ] DCAE / MambaVC 的容器化迁移记入 `plan/exec-plans/active/dcae-mambavc-containerization.md`（独立 follow-up PR）—— **延后**，等本 PR 在 upstream merge 后再起草
