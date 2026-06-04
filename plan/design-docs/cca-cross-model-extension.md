@@ -1,5 +1,7 @@
 # CCA 作为跨模型可插拔辅助熵模型
 
+> **⚠️ 已过时（2026-06-04 标注）**：本备忘描述的是 **`script` 分支**的插件形态——CCA aux 熵模型作为独立 `compressai/entropy_models/cca.py::CausalContextAdjustmentEntropyModel`，经 `use_cca=True` 挂到 TCM、并设想推广到 STF/WACNN/MLIC 等多宿主。**`master`（上游形态）已放弃此愿景**：迁入时合并为**单宿主** `CCAModel`，TCM 的 `use_cca` 路径已删除，aux 分支降为 `cca.py` 内私有 `_CCAAuxEntropyModel`（opt-in `cca_training`）。以 [`cca-embedding-abstraction.md`](cca-embedding-abstraction.md) 为准；本文仅作 `script` 历史记录保留。
+
 **记录日期：** 2026-05-08
 **触发：** `pr-tcm-cca` 分支开发期间，发现 CCA 的辅助熵模型本质上是个独立 `nn.Module`，目前只接到了 TCM 一个模型上（通过 `use_cca=True` 开关），但其设计完全可以推广到更多 channel-slice 风格的 LIC 模型。
 
