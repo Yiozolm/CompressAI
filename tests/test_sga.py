@@ -45,6 +45,7 @@ from compressai.latent_codecs import (
 )
 from compressai.layers import CheckerboardMaskedConv2d
 from compressai.models._helpers.sga import SGARefinementMixin
+from compressai.models.mlic import MLICPlusPlus, MLICv2, MLICv2Plus
 from compressai.ops import SGAQuantizer
 
 
@@ -256,6 +257,72 @@ class TestSGARefinementMixin:
             out = model.refine_forward(y, z)
         assert y.shape == (1, 4, 8, 8)
         assert z.shape == (1, 2, 8, 8)
+        assert out["x_hat"].shape == x.shape
+        assert out["likelihoods"]["y"].shape == y.shape
+        assert out["likelihoods"]["z"].shape == z.shape
+
+
+class TestMlicSGARefinement:
+    def test_sga_interface_is_mlicv2plus_only(self) -> None:
+        assert not hasattr(
+            MLICPlusPlus(N=8, M=16, slice_num=4, context_window=3),
+            "set_sga_mode",
+        )
+        assert not hasattr(
+            MLICv2(N=8, M=16, slice_num=4, context_window=3), "set_sga_mode"
+        )
+        assert hasattr(
+            MLICv2Plus(N=8, M=16, slice_num=4, context_window=3),
+            "set_sga_mode",
+        )
+
+    def test_set_sga_mode_propagates_and_restores_defaults(self) -> None:
+        model = MLICv2Plus(N=8, M=16, slice_num=4, context_window=3)
+        sga = SGAQuantizer()
+        model.set_sga_mode(sga)
+
+        z_codec = model.latent_codec.latent_codec["z"]
+        assert z_codec.quantizer == "sga"
+        assert z_codec.sga is sga
+        leaf_sgas = {
+            id(module.sga)
+            for module in model.modules()
+            if isinstance(module, MultiContextCheckerboardLatentCodec)
+        }
+        assert leaf_sgas == {id(sga)}
+
+        model.set_sga_mode(None)
+        assert z_codec.quantizer == "ste"
+        assert z_codec.sga is None
+        for module in model.modules():
+            if isinstance(module, MultiContextCheckerboardLatentCodec):
+                assert module.quantizer == "ste"
+                assert module.sga is None
+
+    def test_refine_forward_without_sga_matches_forward(self) -> None:
+        torch.manual_seed(3)
+        model = MLICv2Plus(N=8, M=16, slice_num=4, context_window=3).eval()
+        x = torch.randn(1, 3, 64, 64)
+        with torch.no_grad():
+            full = model(x)
+            y, z = model.refine_extract(x)
+            refined = model.refine_forward(y, z)
+        assert y.shape == (1, 16, 4, 4)
+        assert z.shape == (1, 8, 1, 1)
+        assert torch.allclose(refined["x_hat"], full["x_hat"])
+        assert torch.allclose(refined["likelihoods"]["y"], full["likelihoods"]["y"])
+        assert torch.allclose(refined["likelihoods"]["z"], full["likelihoods"]["z"])
+
+    def test_mlicv2plus_refine_sga_interface_smoke(self) -> None:
+        pytest.importorskip("timm")
+        model = MLICv2Plus(N=8, M=16, slice_num=4, context_window=3).eval()
+        x = torch.randn(1, 3, 64, 64)
+        y, z = model.refine_extract(x)
+        sga = SGAQuantizer()
+        sga.set_iter(800)
+        model.set_sga_mode(sga)
+        with torch.no_grad():
+            out = model.refine_forward(y, z)
         assert out["x_hat"].shape == x.shape
         assert out["likelihoods"]["y"].shape == y.shape
         assert out["likelihoods"]["z"].shape == z.shape

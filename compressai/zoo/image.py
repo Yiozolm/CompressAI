@@ -87,6 +87,7 @@ __all__ = [
     "mlicplus",
     "mlicpp",
     "mlicv2",
+    "mlicv2plus",
     "saaf",
     "stf",
     "stf_wacnn",
@@ -107,6 +108,7 @@ model_architectures = {
     "mlicplus": _LazyImport("compressai.models.mlic", "MLICPlus"),
     "mlicpp": _LazyImport("compressai.models.mlic", "MLICPlusPlus"),
     "mlicv2": _LazyImport("compressai.models.mlic", "MLICv2"),
+    "mlicv2plus": _LazyImport("compressai.models.mlic", "MLICv2Plus"),
     "saaf": _LazyImport("compressai.models.saaf", "SAAF"),
     # Resolved lazily so `compressai.zoo` is importable without `timm`.
     "stf": _LazyImport("compressai.models.stf", "SymmetricalTransFormer"),
@@ -617,6 +619,23 @@ def mlicv2(pretrained: bool = False, progress: bool = True, **kwargs):
     from compressai.models.mlic import MLICv2
 
     return MLICv2(**kwargs)
+
+
+def mlicv2plus(pretrained: bool = False, progress: bool = True, **kwargs):
+    r"""MLICv2+ model with SGA inference-time refinement.
+
+    Args:
+        pretrained (bool): If True, returns a pre-trained model. Currently
+            unavailable; raises ``RuntimeError``.
+        progress (bool): If True, displays a progress bar of the download to
+            stderr.
+    """
+    del progress
+    if pretrained:
+        raise RuntimeError("Pre-trained MLICv2+ weights are not yet hosted on S3.")
+    from compressai.models.mlic import MLICv2Plus
+
+    return MLICv2Plus(**kwargs)
 
 
 def stf(pretrained: bool = False, progress: bool = True, **kwargs):

@@ -71,6 +71,7 @@ from compressai.models._helpers.multi_context_slice import (
     _Mlicv2HgcpAnchorContext,
     _select_global_inter_factory,
 )
+from compressai.models._helpers.sga import SGARefinementMixin
 from compressai.models.base import CompressionModel
 from compressai.registry import register_model
 
@@ -79,6 +80,7 @@ __all__ = [
     "MLICPlus",
     "MLICPlusPlus",
     "MLICv2",
+    "MLICv2Plus",
 ]
 
 
@@ -100,6 +102,10 @@ __all__ = [
 #                    + GSC: post-training skip predictor
 #                                            v
 #                                          MLICv2
+#                                            |
+#                                            + SGA inference-time refinement
+#                                            v
+#                                          MLICv2+
 
 
 _CURRENT_SLICE_RE = re.compile(r"^latent_codec\.y\.latent_codec\.y(\d+)\.")
@@ -495,3 +501,8 @@ class MLICv2(_BaseMLIC):
             context_window=context_window,
             **kwargs,
         )
+
+
+@register_model("mlicv2plus")
+class MLICv2Plus(SGARefinementMixin, MLICv2):
+    r"""MLICv2+ model with SGA inference-time refinement."""
