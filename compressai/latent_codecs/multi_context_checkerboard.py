@@ -35,7 +35,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from compressai.entropy_models import GaussianConditional
-from compressai.ops import quantize_ste
+from compressai.ops import SGAQuantizer, quantize_ste
 from compressai.registry import register_module
 
 from . import _checkerboard_helpers as _ckb
@@ -88,18 +88,22 @@ class MultiContextCheckerboardLatentCodec(LatentCodec):
         lrp_scale: float = 0.5,
         anchor_parity: str = "even",
         quantizer: str = "ste",
+        sga: Optional[SGAQuantizer] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__()
         if anchor_parity not in ("even", "odd"):
             raise ValueError(f'Invalid "anchor_parity" value "{anchor_parity}"')
-        if quantizer != "ste":
+        if quantizer not in ("ste", "sga"):
             raise ValueError(f'Invalid quantizer "{quantizer}"')
+        if quantizer == "sga" and sga is None:
+            raise ValueError('quantizer="sga" requires the `sga` argument')
 
         self._kwargs = kwargs
         self.anchor_parity = anchor_parity
         self.non_anchor_parity = {"odd": "even", "even": "odd"}[anchor_parity]
         self.quantizer = quantizer
+        self.sga = sga
         self.entropy_parameters_anchor = entropy_parameters_anchor
         self.entropy_parameters_nonanchor = entropy_parameters_nonanchor
         self.spatial_context_anchor = spatial_context_anchor
@@ -179,8 +183,11 @@ class MultiContextCheckerboardLatentCodec(LatentCodec):
             y_hat_steps.append(y_hat_i)
 
         y_hat = y_hat_steps[0] + y_hat_steps[1]
-        y_out = self.y(y, params)
-        y_likelihoods = y_out["likelihoods"]["y"]
+        if self.quantizer == "sga":
+            y_likelihoods = self._likelihood_for_quantized(y_hat, params)
+        else:
+            y_out = self.y(y, params)
+            y_likelihoods = y_out["likelihoods"]["y"]
         if selective_masks:
             selective_mask = selective_masks[0] | selective_masks[1]
             y_likelihoods = torch.where(
@@ -362,7 +369,18 @@ class MultiContextCheckerboardLatentCodec(LatentCodec):
         return self.entropy_parameters_nonanchor
 
     def _quantize(self, y: Tensor, means: Tensor) -> Tensor:
+        if self.quantizer == "sga":
+            assert self.sga is not None
+            return self.sga(y - means) + means
         return quantize_ste(y - means) + means
+
+    def _likelihood_for_quantized(self, y_hat: Tensor, params: Tensor) -> Tensor:
+        scales, means = self.y._chunk(params)
+        gc = self.y.gaussian_conditional
+        likelihood = gc._likelihood(y_hat, scales, means)
+        if gc.use_likelihood_bound:
+            likelihood = gc.likelihood_lower_bound(likelihood)
+        return likelihood
 
     def _apply_lrp(
         self,

@@ -30,10 +30,12 @@
 from .bound_ops import LowerBound
 from .ops import compute_padding, quantize_ste
 from .parametrizers import NonNegativeParametrizer
+from .sga import SGAQuantizer
 
 __all__ = [
     "compute_padding",
     "quantize_ste",
     "LowerBound",
     "NonNegativeParametrizer",
+    "SGAQuantizer",
 ]

@@ -27,7 +27,7 @@
 # OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from typing import Any, Dict, List, Mapping, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -36,7 +36,7 @@ from torch import Tensor
 
 from compressai.entropy_models import EntropyModel
 from compressai.layers import CheckerboardMaskedConv2d
-from compressai.ops import quantize_ste
+from compressai.ops import SGAQuantizer, quantize_ste
 from compressai.registry import register_module
 
 from .base import LatentCodec
@@ -115,13 +115,21 @@ class CheckerboardLatentCodec(LatentCodec):
         context_prediction: CheckerboardMaskedConv2d,
         anchor_parity="even",
         forward_method="twopass",
+        quantizer: str = "ste",
+        sga: Optional[SGAQuantizer] = None,
         **kwargs,
     ):
         super().__init__()
+        if quantizer not in ("ste", "sga"):
+            raise ValueError(f'Invalid quantizer "{quantizer}"')
+        if quantizer == "sga" and sga is None:
+            raise ValueError('quantizer="sga" requires the `sga` argument')
         self._kwargs = kwargs
         self.anchor_parity = anchor_parity
         self.non_anchor_parity = {"odd": "even", "even": "odd"}[anchor_parity]
         self.forward_method = forward_method
+        self.quantizer = quantizer
+        self.sga = sga
         self.entropy_parameters = entropy_parameters
         self.context_prediction = context_prediction
         self.y = latent_codec["y"]
@@ -144,6 +152,8 @@ class CheckerboardLatentCodec(LatentCodec):
 
         This method uses uniform noise to roughly model quantization.
         """
+        if self.quantizer == "sga":
+            raise ValueError('quantizer="sga" requires a two-pass forward method')
         y_hat = self.quantize(y)
         y_ctx = self._mask_all_but_step(self.context_prediction(y_hat), "non_anchor")
         params = self.entropy_parameters(self.merge(y_ctx, side_params))
@@ -187,17 +197,21 @@ class CheckerboardLatentCodec(LatentCodec):
             # Determine y_hat for current step.
             _, means_i = self.latent_codec["y"]._chunk(params_i)
             y_i = self._mask_all_but_step(y, step)
-            y_hat_i = quantize_ste(y_i - means_i) + means_i
+            y_hat_i = self._quantize(y_i, means_i)
             y_hat_i = self._mask_all_but_step(y_hat_i, step)
             y_hat_.append(y_hat_i)
 
         [y_hat_anchors, y_hat_non_anchors] = y_hat_
         y_hat = y_hat_anchors + y_hat_non_anchors
-        y_out = self.latent_codec["y"](y, params)
+        if self.quantizer == "sga":
+            y_likelihoods = self._likelihood_for_quantized(y_hat, params)
+        else:
+            y_out = self.latent_codec["y"](y, params)
+            y_likelihoods = y_out["likelihoods"]["y"]
 
         return {
             "likelihoods": {
-                "y": y_out["likelihoods"]["y"],
+                "y": y_likelihoods,
             },
             "y_hat": y_hat,
         }
@@ -215,21 +229,27 @@ class CheckerboardLatentCodec(LatentCodec):
         params = self.entropy_parameters(self.merge(y_ctx, side_params))
         params = self._mask_all_but_step(params, "anchor")  # Probably unnecessary.
         _, means_hat = self.latent_codec["y"]._chunk(params)
-        y_hat_anchors = quantize_ste(y - means_hat) + means_hat
+        y_hat_anchors = self._quantize(y, means_hat)
         y_hat_anchors = self._mask_all_but_step(y_hat_anchors, "anchor")
 
         y_ctx = self.context_prediction(y_hat_anchors)
         y_ctx = self._mask_all_but_step(y_ctx, "non_anchor")  # Probably unnecessary.
         params = self.entropy_parameters(self.merge(y_ctx, side_params))
-        y_out = self.latent_codec["y"](y, params)
+        if self.quantizer == "sga":
+            _, means_hat = self.latent_codec["y"]._chunk(params)
+            y_hat = self._quantize(y, means_hat)
+            y_likelihoods = self._likelihood_for_quantized(y_hat, params)
+        else:
+            y_out = self.latent_codec["y"](y, params)
+            y_hat = y_out["y_hat"]
+            y_likelihoods = y_out["likelihoods"]["y"]
 
         # Reuse quantized y_hat that was used for non-anchor context prediction.
-        y_hat = y_out["y_hat"]
         self._copy(y_hat, y_hat_anchors, "anchor")  # Probably unnecessary.
 
         return {
             "likelihoods": {
-                "y": y_out["likelihoods"]["y"],
+                "y": y_likelihoods,
             },
             "y_hat": y_hat,
         }
@@ -378,3 +398,19 @@ class CheckerboardLatentCodec(LatentCodec):
         mode = "noise" if self.training else "dequantize"
         y_hat = EntropyModel.quantize(None, y, mode)
         return y_hat
+
+    def _quantize(self, y: Tensor, means: Tensor) -> Tensor:
+        if self.quantizer == "sga":
+            assert self.sga is not None
+            return self.sga(y - means) + means
+        return quantize_ste(y - means) + means
+
+    def _likelihood_for_quantized(self, y_hat: Tensor, params: Tensor) -> Tensor:
+        if hasattr(self.latent_codec["y"], "_likelihood_for_quantized"):
+            return self.latent_codec["y"]._likelihood_for_quantized(y_hat, params)
+        scales, means = self.latent_codec["y"]._chunk(params)
+        gc = self.latent_codec["y"].gaussian_conditional
+        likelihood = gc._likelihood(y_hat, scales, means)
+        if gc.use_likelihood_bound:
+            likelihood = gc.likelihood_lower_bound(likelihood)
+        return likelihood

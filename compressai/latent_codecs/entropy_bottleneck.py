@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from torch import Tensor
 
 from compressai.entropy_models import EntropyBottleneck
-from compressai.ops import quantize_ste
+from compressai.ops import SGAQuantizer, quantize_ste
 from compressai.registry import register_module
 
 from .base import LatentCodec
@@ -66,18 +66,47 @@ class EntropyBottleneckLatentCodec(LatentCodec):
         self,
         entropy_bottleneck: Optional[EntropyBottleneck] = None,
         quantizer: str = "noise",
+        sga: Optional[SGAQuantizer] = None,
         **kwargs,
     ):
         super().__init__()
         self.entropy_bottleneck = entropy_bottleneck or EntropyBottleneck(**kwargs)
+        if quantizer not in ("noise", "ste", "sga"):
+            raise ValueError(f'Invalid quantizer "{quantizer}"')
+        if quantizer == "sga" and sga is None:
+            raise ValueError('quantizer="sga" requires the `sga` argument')
         self.quantizer = quantizer
+        self.sga = sga
 
     def forward(self, y: Tensor) -> Dict[str, Any]:
+        if self.quantizer == "sga":
+            assert self.sga is not None
+            y_medians = self.entropy_bottleneck._get_medians()
+            y_hat = self.sga(y - y_medians) + y_medians
+            y_likelihoods = self._likelihood_for_quantized(y_hat)
+            return {"likelihoods": {"y": y_likelihoods}, "y_hat": y_hat}
         y_hat, y_likelihoods = self.entropy_bottleneck(y)
         if self.quantizer == "ste":
             y_medians = self.entropy_bottleneck._get_medians()
             y_hat = quantize_ste(y - y_medians) + y_medians
         return {"likelihoods": {"y": y_likelihoods}, "y_hat": y_hat}
+
+    def _likelihood_for_quantized(self, y_hat: Tensor) -> Tensor:
+        """Compute likelihood for an already-quantized latent."""
+        eb = self.entropy_bottleneck
+        d = y_hat.dim()
+        perm = [1, 0] + list(range(2, d))
+        inv_perm = [0] * d
+        for i, p in enumerate(perm):
+            inv_perm[p] = i
+
+        y_hat = y_hat.permute(*perm).contiguous()
+        shape = y_hat.size()
+        values = y_hat.reshape(y_hat.size(0), 1, -1)
+        likelihood, _, _ = eb._likelihood(values)
+        if eb.use_likelihood_bound:
+            likelihood = eb.likelihood_lower_bound(likelihood)
+        return likelihood.reshape(shape).permute(*inv_perm).contiguous()
 
     def compress(self, y: Tensor) -> Dict[str, Any]:
         shape = y.shape[1:]
